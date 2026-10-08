@@ -23,3 +23,13 @@ Setiap data, sesi, riwayat versi, dan ID operasi dibatasi oleh ID pengguna dari 
 Perubahan jadwal menyimpan salinan versi sebelumnya dan memakai transaksi serta revision untuk menghindari penimpaan dari perangkat lain. Tidak tersedia endpoint penghapusan permanen catatan. Cadangan JSON dapat diunduh dan diimpor. Data lokal versi sebelumnya tetap tersedia untuk pemindahan setelah login; jika berpindah domain, unduh JSON dari domain lama dan impor pada domain baru.
 
 `npm test --prefix backend` memeriksa pendaftaran, login, isolasi antar akun, idempotensi, konflik versi, pemulihan, kompatibilitas akun lama, dan cookie browser.
+
+## PWA dan mode offline
+
+Buka aplikasi lewat HTTPS, lalu ketuk **Pasang Jaga**. Di Android/Chrome, menu **Instal aplikasi** atau **Tambahkan ke layar utama** juga tersedia. Di iPhone/Safari, gunakan **Bagikan → Tambahkan ke Layar Utama**. PWA memakai login dan MongoDB yang sama dengan versi browser.
+
+Service worker menyimpan tampilan dan aset build yang sesuai. Setelah login online berhasil, salinan catatan terakhir akun aktif disimpan di IndexedDB selama maksimal 90 hari. Saat koneksi tidak tersedia, kalender, riwayat, laporan, dan unduhan cadangan bisa dibuka dalam mode baca. Perubahan tetap memerlukan konfirmasi server; tidak ada antrean perubahan offline. Jika sambungan putus saat mengisi formulir, isian tetap tersedia untuk dicoba kembali.
+
+Salinan offline diperbarui setelah server mengonfirmasi penyimpanan atau pemulihan versi. Logout dan pergantian akun menghapus salinan akun sebelumnya. Cache service worker hanya berisi aset aplikasi; respons API, password, token sesi, dan kode pemulihan tidak masuk cache. Menghapus data browser dapat menghapus salinan offline, sedangkan data utama tetap tersimpan di MongoDB.
+
+Pembaruan muncul lewat tombol **Perbarui aplikasi**. Tombol menunggu formulir, proses penyimpanan, dan tampilan kode pemulihan selesai agar muat ulang tidak membuang isian. Build menyisipkan nama aset yang sebenarnya ke precache dan memberi versi cache berdasarkan isi build.

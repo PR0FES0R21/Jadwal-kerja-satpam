@@ -1,3 +1,4 @@
+import {pwaBuild} from './pwa-build.mjs';
 import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/postcss';
@@ -9,7 +10,7 @@ import {dirname,resolve} from 'node:path';
 const animationCss=resolve(dirname(findPackageJSON('tw-animate-css',import.meta.url)),'dist/tw-animate.css');
 const packages=['react','react-dom','radix-ui','lucide-react','sonner','class-variance-authority','clsx','tailwind-merge'];
 export default defineConfig({
-  plugins:[react()],
+  plugins:[react(),pwaBuild()],
   publicDir:'../public',
   css:{postcss:{plugins:[tailwind()]}},
   resolve:{alias:[{find:'tailwindcss',replacement:fileURLToPath(import.meta.resolve('tailwindcss/index.css'))},{find:'tw-animate-css',replacement:animationCss},{find:'@',replacement:fileURLToPath(new URL('../',import.meta.url))},...packages.map(name=>({find:new RegExp('^'+name+'$'),replacement:fileURLToPath(import.meta.resolve(name))}))],dedupe:['react','react-dom']},
