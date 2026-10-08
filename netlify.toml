@@ -1,0 +1,11 @@
+[build]
+  base = "backend"
+  command = "npm ci --omit=dev"
+  publish = "public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[functions]
+  node_bundler = "esbuild"
