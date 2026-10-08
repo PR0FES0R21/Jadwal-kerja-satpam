@@ -19,3 +19,5 @@
 .long-bar.filtered{opacity:.3}
 .legend .long{color:#24676d}
 @media(max-width:540px){.long-bar{margin:0 2px;padding:2px;min-height:24px}.long-bar.continues-before{margin-left:0}.long-bar.continues-after{margin-right:0}}
+
+.account-screen{min-height:100dvh;display:grid;place-items:center;padding:24px}.account-panel{width:100%;max-width:460px;padding:30px;display:flex;flex-direction:column;gap:20px}.account-logo{color:#087c64}.account-panel .event-form{gap:16px}.migration-banner{background:#eaf6f1;border-bottom:1px solid #cce6dc;padding:14px 4%;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:14px}.migration-banner>span{flex:1;min-width:220px}.migration-banner .error{width:100%;margin:0}.account-panel a{text-decoration:none}
