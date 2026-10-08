@@ -4,7 +4,7 @@ Aplikasi kalender shift, tukar jaga dua arah dengan perhitungan FIFO, lembur, da
 
 ## Deploy ke Netlify
 
-Hubungkan repository ini, branch `main`, lalu gunakan konfigurasi root `netlify.toml`. Base directory: `frontend`; build command: `npm ci --prefix ../backend --omit=dev && npm run build`; publish directory: `dist`; Functions directory: `../backend/netlify/functions`. Frontend React/Vite dan API diterbitkan bersamaan pada satu domain.
+Hubungkan repository ini, branch `main`, lalu gunakan konfigurasi root `netlify.toml`. Base directory: `frontend`; build command: `npm ci --include=dev && npm ci --prefix ../backend --omit=dev && npm run build`; publish directory: `dist`; Functions directory: `../backend/netlify/functions`. Frontend React/Vite dan API diterbitkan bersamaan pada satu domain. Build memasang dependency frontend dari lockfile npm sendiri, meskipun deteksi awal Netlify memakai pnpm root. `NETLIFY_NEXT_PLUGIN_SKIP=true` menonaktifkan runtime Next.js yang mungkin tersimpan dari konfigurasi lama di dashboard.
 
 Set `MONGODB_URI`, `MONGODB_DATABASE=jaga`, dan `JAGA_API_KEY` pada environment variables dengan scope Functions. Gunakan Node.js 24; jika menggunakan `AWS_LAMBDA_JS_RUNTIME`, isi `nodejs24.x`. Simpan semua credential di environment, bukan repository. Konfigurasi email pemilik tidak diperlukan. Perubahan environment memerlukan deploy ulang.
 

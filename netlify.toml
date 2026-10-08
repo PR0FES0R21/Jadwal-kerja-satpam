@@ -1,11 +1,12 @@
 [build]
   base = "frontend"
-  command = "npm ci --prefix ../backend --omit=dev && npm run build"
+  command = "npm ci --include=dev && npm ci --prefix ../backend --omit=dev && npm run build"
   publish = "dist"
   functions = "../backend/netlify/functions"
 
 [build.environment]
   NODE_VERSION = "24"
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
 
 [functions]
   node_bundler = "esbuild"
