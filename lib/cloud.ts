@@ -1,5 +1,5 @@
 import {Data,emptyData,loadData,validateBackup} from './jaga';
-export type CloudSession={user:{username:string}|null;initialized:boolean;ownerVerified:boolean;setupSignIn:string};
+export type CloudSession={user:{username:string}|null;};
 export class CloudError extends Error{constructor(message:string,public status:number){super(message);}}
 export async function cloud<T>(path:string,method='GET',body?:unknown):Promise<T>{
   let response:Response;

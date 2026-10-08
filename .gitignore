@@ -45,3 +45,7 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+/frontend/node_modules/
+/frontend/dist/
+*.tsbuildinfo

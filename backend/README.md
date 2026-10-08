@@ -1,37 +1,27 @@
-# Jaga MongoDB API — Netlify
+# Jaga MongoDB API
 
-Server Node.js 24 ini menyimpan akun, sesi login, catatan saat ini, dan versi sebelumnya di MongoDB Atlas. Frontend Sites mengaksesnya melalui proxy HTTPS; credential MongoDB tidak dikirim ke browser.
+Node.js 24 dan MongoDB Atlas. `api.mjs` menangani akun dan catatan. `browser.mjs` menangani endpoint `/api/cloud/*` dengan cookie HttpOnly, pemeriksaan origin, dan credential internal. Netlify menerbitkan fungsi bersama frontend pada satu domain. Tidak ada identitas dari layanan eksternal yang diperlukan.
 
-## Deploy Netlify
+## Environment
 
-Import repository `PR0FES0R21/Jadwal-kerja-satpam`, branch `main`. Root `netlify.toml` mengatur base directory `backend`, build `npm ci --omit=dev`, publish `public`, dan Functions `netlify/functions`. Kode frontend Sites tidak diterbitkan oleh deploy ini.
+- `MONGODB_URI`: URI database lengkap; URL-encode karakter khusus pada password.
+- `MONGODB_DATABASE`: default `jaga`.
+- `JAGA_API_KEY`: secret internal acak, tidak dikirim ke browser.
+- `AWS_LAMBDA_JS_RUNTIME`: `nodejs24.x` jika dipakai di Netlify.
+- `PORT`: default 10000 untuk adapter HTTP lokal.
 
-Tambahkan `MONGODB_URI`, `MONGODB_DATABASE=jaga`, `JAGA_API_KEY`, dan `OWNER_EMAIL` lewat Netlify Environment Variables dengan scope Functions (atau All scopes). Set `AWS_LAMBDA_JS_RUNTIME=nodejs24.x`. NODE_VERSION=24 sudah diatur untuk build. Jangan menaruh credential di repository atau netlify.toml. Perubahan env memerlukan deploy ulang.
+Variabel Netlify perlu scope Functions dan deploy ulang setelah perubahan. `/health` menguji proses. `/ready` dengan `Authorization: Bearer <JAGA_API_KEY>` menguji koneksi database. Health HTTP saja tidak membuktikan MongoDB tersambung.
 
-Setelah publish, GET `/health` harus 200. GET `/ready` dengan header `Authorization: Bearer <JAGA_API_KEY>` harus mengembalikan `{ready:true}` untuk membuktikan koneksi MongoDB; endpoint ini membuat indeks sesi/pemulihan, tidak membuat akun atau menulis jadwal. Health saja tidak membuktikan koneksi database.
+## Akun
 
-Frontend Sites tetap memakai alamat yang sekarang. Setelah backend lolos pengujian, atur `JAGA_BACKEND_URL` ke origin HTTPS Netlify dan API key yang sama, lalu publish frontend. Jangan aktifkan konfigurasi frontend sebelum database terbukti terhubung.
+`/auth/register` membuat ID acak, user, dan state kosong dalam satu transaksi. Username unik dan dinormalisasi menjadi huruf kecil. Akun lama dengan ID `owner` tetap dipertahankan beserta data dan versinya. `/auth/login` menghasilkan sesi 90 hari. `/auth/recover` memerlukan username, password baru, dan kode pemulihan; kode diganti dan sesi sebelumnya dicabut. `/auth/recovery-key` memerlukan sesi dan password saat ini sebelum menerbitkan kode baru.
 
-Untuk lokal, `npm start --prefix backend` menjalankan adapter HTTP dari core API yang sama. Adapter Netlify tidak membuka port dan memakai Web Request/Response. Batas JSON 4 MiB menyediakan ruang di bawah batas payload Netlify. Pool MongoDB digunakan ulang selama instance hangat, maksimum 5 koneksi dengan idle timeout 10 detik. Initialization yang gagal menutup client dan bisa dicoba kembali.
+Semua endpoint data memperoleh ID pengguna dari sesi server, termasuk state, versi, pemulihan versi, dan operasi idempoten. ID pengguna yang diberikan browser tidak digunakan. Setup berbasis identitas pemilik tidak tersedia lagi.
 
-Environment server:
-- `MONGODB_URI`: URI database lengkap, password dengan URL encoding.
-- `MONGODB_DATABASE`: `jaga`.
-- `JAGA_API_KEY`: secret acak yang sama dengan secret pada Sites.
-- `OWNER_EMAIL`: email akun ChatGPT pemilik aplikasi.
-- `NODE_VERSION`: `24`.
+## Durabilitas
 
-Environment Sites:
-- `JAGA_BACKEND_URL`: URL HTTPS backend Netlify.
-- `JAGA_API_KEY`: secret yang sama.
-- `JAGA_OWNER_EMAIL`: email pemilik yang sama.
+Setiap penulisan menggunakan transaksi MongoDB dengan majority write concern: versi sebelumnya, perubahan terbaru, dan tanda idempotensi. Revision harus cocok. Tidak ada endpoint hapus permanen data. TTL hanya untuk sesi dan pembatas percobaan.
 
-Pembuatan akun dan pemulihan password memerlukan identitas pemilik dari ChatGPT. Username/password aplikasi kemudian digunakan untuk login biasa. Sesi HttpOnly berlaku 90 hari dan diperpanjang ketika aktif. Password di-hash menggunakan scrypt dan salt acak. Token sesi disimpan sebagai hash.
+Riwayat dalam cluster bukan cadangan terpisah. Tetap gunakan cadangan JSON atau backup Atlas untuk melindungi dari hilangnya seluruh cluster.
 
-Setiap perubahan disimpan dengan transaksi MongoDB: salinan versi lama + perubahan saat ini + tanda idempotensi. Penulisan hanya diterima jika revision cocok. Versi lama tidak dihapus otomatis. Tidak tersedia endpoint penghapusan permanen catatan. TTL hanya berlaku untuk sesi dan penghitung percobaan login.
-
-Versi sebelumnya di database bukan cadangan terpisah dari cluster. Tetap unduh JSON ke tempat terpisah; aktifkan backup Atlas sesuai paket yang tersedia untuk melindungi dari hilangnya seluruh cluster.
-
-Pastikan Network Access Atlas mengizinkan koneksi keluar backend Netlify. Hindari membuka database ke semua IP bila alamat/rentang keluar yang tetap tersedia.
-
-`/health` menguji proses HTTP. `/ready` dengan authorization internal menguji koneksi database. Health HTTP sukses tidak membuktikan MongoDB terhubung.
+Pool koneksi digunakan ulang, maksimum 5 koneksi dengan idle timeout 10 detik. Initialization yang gagal menutup client dan dapat dicoba lagi. JSON dibatasi 4 MiB.

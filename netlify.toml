@@ -1,11 +1,16 @@
 [build]
-  base = "backend"
-  command = "npm ci --omit=dev"
-  publish = "public"
-  functions = "netlify/functions"
+  base = "frontend"
+  command = "npm ci --prefix ../backend --omit=dev && npm run build"
+  publish = "dist"
+  functions = "../backend/netlify/functions"
 
 [build.environment]
   NODE_VERSION = "24"
 
 [functions]
   node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
