@@ -1,4 +1,5 @@
 import {MongoClient} from 'mongodb';
+import {emptyProfile,profileFields} from '../lib/profile.ts';
 import {emptyData,validateBackup} from '../lib/jaga.ts';
 import {credentials,hashPassword,verifyPassword,token,digest,safeEqual} from './security.mjs';
 
@@ -53,7 +54,8 @@ return async function handleRequest(req){
     if(path==='/ready'){await database.command({ping:1});return send(200,{ready:true});}
     if(path==='/auth/me'&&method==='GET'){
       let session;try{session=await authenticate(req,database);}catch(e){if(e.status!==401)throw e;}
-      return send(200,{user:session?{username:session.username}:null});
+      const user=session?await database.collection('users').findOne({_id:session.userId}):null;
+      return send(200,{user:user?{username:user.username,profile:user.profile??emptyProfile()}:null});
     }
     if(path==='/auth/register'&&method==='POST'){
       const input=await body(req),username=credentials(input.username,input.password);
@@ -89,6 +91,23 @@ return async function handleRequest(req){
       return send(200,{user:{username},recoveryCode,sessionToken:await createSession(database,user._id,username)});
     }
     const auth=await authenticate(req,database);
+    if(path==='/profile'&&(method==='GET'||method==='PUT')){
+      const user=await database.collection('users').findOne({_id:auth.userId});if(!user)fail(401,'Silakan masuk kembali.');
+      const current=user.profile??emptyProfile();
+      if(method==='GET')return send(200,{profile:current});
+      const input=await body(req);
+      if(!input||typeof input!=='object'||Array.isArray(input)||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||Object.keys(input).some(key=>!['profile','expectedRevision'].includes(key)))fail(400,'Permintaan profil tidak valid.');
+      let fields;try{fields=profileFields(input.profile);}catch(e){fail(400,e.message);}
+      if(current.revision!==input.expectedRevision){
+        if(current.revision===input.expectedRevision+1&&Object.entries(fields).every(([key,value])=>current[key]===value))return send(200,{profile:current});
+        fail(409,'Profil berubah di perangkat lain. Muat profil terbaru sebelum menyimpan.');
+      }
+      const next={...fields,revision:current.revision+1};
+      const filter={_id:auth.userId,...(user.profile?{'profile.revision':current.revision}:{profile:{$exists:false}})};
+      const result=await database.collection('users').updateOne(filter,{$set:{profile:next,profileUpdatedAt:new Date()}});
+      if(result.matchedCount!==1)fail(409,'Profil berubah di perangkat lain. Muat profil terbaru sebelum menyimpan.');
+      return send(200,{profile:next});
+    }
     if(path==='/auth/recovery-key'&&method==='POST'){
       const input=await body(req),user=await database.collection('users').findOne({_id:auth.userId});
       if(!user||!await verifyPassword(input.password,user.passwordHash))fail(401,'Password salah.');

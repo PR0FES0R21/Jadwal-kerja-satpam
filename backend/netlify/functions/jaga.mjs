@@ -6,4 +6,4 @@ export default async function(req,context){
   if(new URL(req.url).pathname.startsWith('/api/cloud/'))return browserRequest(req,handle,Netlify.env.get('JAGA_API_KEY'),context?.ip);
   return handle(req);
 }
-export const config={path:['/api/cloud/*','/health','/ready','/auth/*','/state','/versions','/versions/*'],method:['GET','POST','PUT']};
+export const config={path:['/api/cloud/*','/health','/ready','/auth/*','/state','/profile','/versions','/versions/*'],method:['GET','POST','PUT']};

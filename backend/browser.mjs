@@ -1,4 +1,4 @@
-const allowed=new Set(['auth/me','auth/register','auth/login','auth/logout','auth/recover','auth/recovery-key','state','versions','versions/restore']);
+const allowed=new Set(['auth/me','auth/register','auth/login','auth/logout','auth/recover','auth/recovery-key','state','profile','versions','versions/restore']);
 const cookieName='__Host-jaga_session';
 // Browser authentication stays on the same origin. Internal headers supplied
 // by visitors are discarded; only the server adds the service credential.

@@ -33,3 +33,9 @@ Service worker menyimpan tampilan dan aset build yang sesuai. Setelah login onli
 Salinan offline diperbarui setelah server mengonfirmasi penyimpanan atau pemulihan versi. Logout dan pergantian akun menghapus salinan akun sebelumnya. Cache service worker hanya berisi aset aplikasi; respons API, password, token sesi, dan kode pemulihan tidak masuk cache. Menghapus data browser dapat menghapus salinan offline, sedangkan data utama tetap tersimpan di MongoDB.
 
 Pembaruan muncul lewat tombol **Perbarui aplikasi**. Tombol menunggu formulir, proses penyimpanan, dan tampilan kode pemulihan selesai agar muat ulang tidak membuang isian. Build menyisipkan nama aset yang sebenarnya ke precache dan memberi versi cache berdasarkan isi build.
+
+## Profil pengguna
+
+Tab **Profil** dan avatar di header membuka profil akun aktif. Nama tampilan, regu, tempat kerja, dan bio dapat diedit; username login tetap sama. Informasi disimpan terpisah dari kalender pada akun MongoDB, dengan pemeriksaan revision agar perubahan dari perangkat lain tidak tertimpa. Salinan profil terakhir dapat dilihat offline.
+
+Foto profil hanya disimpan sebagai Blob di IndexedDB browser ini, terpisah berdasarkan username. Foto JPG/PNG/WebP hingga 10 MB dipotong persegi dari tengah dan diperkecil menjadi 512 × 512 sebelum disimpan. Menambah, mengganti, atau menghapus foto tidak mengirim gambar ke API maupun MongoDB, dan dapat dilakukan offline. Foto tetap ada setelah logout sehingga tampil kembali ketika akun yang sama masuk di perangkat ini; akun lain memakai fotonya sendiri. Foto tidak disertakan pada cadangan kalender JSON dan tidak berpindah ke perangkat lain. Penghapusan data browser juga menghapus foto lokal.

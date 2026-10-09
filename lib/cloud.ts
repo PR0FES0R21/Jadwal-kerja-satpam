@@ -1,6 +1,7 @@
 import {Data,emptyData,loadData,validateBackup} from './jaga';
 import {updateSnapshot} from './offline';
-export type CloudSession={user:{username:string}|null;};
+import {Profile} from './profile';
+export type CloudSession={user:{username:string;profile?:Profile}|null;};
 export class CloudError extends Error{constructor(message:string,public status:number){super(message);}}
 export async function cloud<T>(path:string,method='GET',body?:unknown):Promise<T>{
   if(typeof navigator!=='undefined'&&!navigator.onLine)throw new CloudError('Sedang offline. Isian belum disimpan; sambungkan internet lalu coba lagi.',503);

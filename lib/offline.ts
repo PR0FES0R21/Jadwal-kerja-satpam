@@ -1,5 +1,6 @@
 import {Data,validateBackup} from './jaga';
-export type Snapshot={username:string;data:Data;savedAt:string};
+import {Profile} from './profile';
+export type Snapshot={username:string;data:Data;profile?:Profile;savedAt:string};
 const database='jaga-cloud-offline-v1';
 async function access<T>(mode:IDBTransactionMode,action:(store:IDBObjectStore)=>IDBRequest):Promise<T>{
   return new Promise((resolve,reject)=>{
@@ -20,8 +21,10 @@ export async function readSnapshot():Promise<Snapshot|null>{
     validateBackup(value.data);return value;
   }catch{return null;}
 }
-export async function rememberSnapshot(username:string,data:Data){
-  try{validateBackup(data);await access('readwrite',s=>s.put({username,data,savedAt:new Date().toISOString()},'active'));return true;}catch{return false;}
+export async function rememberSnapshot(username:string,data:Data,profile?:Profile){
+  try{validateBackup(data);await access('readwrite',s=>s.put({username,data,profile,savedAt:new Date().toISOString()},'active'));return true;}catch{return false;}
 }
-export async function updateSnapshot(data:Data){const current=await readSnapshot();if(current)await rememberSnapshot(current.username,data);}
+export async function updateSnapshot(data:Data){const current=await readSnapshot();if(current)await rememberSnapshot(current.username,data,current.profile);}
 export async function clearSnapshot(){try{await access('readwrite',s=>s.delete('active'));}catch{}}
+
+export async function updateProfileSnapshot(username:string,profile:Profile){const current=await readSnapshot();if(current?.username===username){try{await access('readwrite',s=>s.put({...current,profile},'active'));}catch{}}}

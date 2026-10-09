@@ -8,7 +8,7 @@ test('Netlify entry handles real Request/Response and requires secret for data',
   globalThis.Netlify={env:{get:key=>({JAGA_API_KEY:'test-only-key'}[key])}};
   try{
     const health=await handler(request('/health'));assert.equal(health.status,200);assert.deepEqual(await health.json(),{status:'running'});assert.equal(health.headers.get('cache-control'),'no-store');
-    for(const path of ['/state','/ready','/versions','/auth/me'])assert.equal((await handler(request(path))).status,401);
+    for(const path of ['/state','/profile','/ready','/versions','/auth/me'])assert.equal((await handler(request(path))).status,401);
     const missing=await handler(request('/state',{authorization:'Bearer test-only-key'}));assert.equal(missing.status,503);assert.equal((await missing.json()).error,'Konfigurasi server belum lengkap.');
   }finally{globalThis.Netlify=old;}
 });
@@ -17,5 +17,5 @@ test('separate API configuration cannot accept a different instance secret',asyn
   assert.equal((await a(request('/state',{authorization:'Bearer second-test-key'}))).status,401);
   assert.equal((await b(request('/state',{authorization:'Bearer first-test-key'}))).status,401);
   assert.deepEqual(config.method,['GET','POST','PUT']);
-  assert.ok(config.path.includes('/health')&&config.path.includes('/state')&&config.path.includes('/auth/*'));
+  assert.ok(config.path.includes('/health')&&config.path.includes('/state')&&config.path.includes('/auth/*')&&config.path.includes('/profile'));
 });
