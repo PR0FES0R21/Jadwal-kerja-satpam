@@ -138,3 +138,19 @@ test('finance validates amounts, dates and rejects forged recording metadata; wr
  assert.equal((await browserRequest(req('https://evil.invalid'),f.handle,'test-key')).status,403);
  const result=await browserRequest(new Request('https://test.invalid/api/cloud/finance',{headers:{cookie:'__Host-jaga_session='+a.sessionToken}}),f.handle,'test-key');assert.equal(result.status,200);assert.equal((await result.json()).data.entries.length,1);
 });
+
+test('paid duty persists per account, validates on server and never creates finance entries',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
+ const event={id:'duty-paid',type:'swap',personId:'peer',direction:'give',settlement:'paid',date:'2026-01-17',shift:'day',start:'2026-01-17T08:00:00+07:00',end:'2026-01-17T20:00:00+07:00',status:'realized',reason:'',notes:'',created:'2026-01-18T00:00:00Z',revision:1};
+ const data={...emptyData(),anchor:'2026-01-12',revision:1,people:[{id:'peer',name:'Rekan',team:'',archived:false}],events:[event]};
+ assert.equal((await f.save(data,a.sessionToken)).status,200);
+ assert.deepEqual((await f.call('/state',undefined,a.sessionToken)).data.events,[event]);
+ assert.deepEqual((await f.call('/state',undefined,b.sessionToken)).data.events,[]);
+ assert.deepEqual((await f.call('/finance',undefined,a.sessionToken)).data.entries,[]);
+ const invalid={...data,revision:2,events:[{...event,settlement:'invalid'}]};
+ assert.equal((await f.save(invalid,a.sessionToken,1,digest('bad-paid'))).status,400);
+ assert.equal((await f.call('/state',undefined,a.sessionToken)).data.revision,1);
+ const swapped={...data,revision:2,events:[{...event,settlement:'swap',revision:2}]};
+ assert.equal((await f.save(swapped,a.sessionToken,1,digest('edit-paid'))).status,200);
+ const restored=await f.call('/versions/restore',{revision:1,expectedRevision:2},a.sessionToken);assert.equal(restored.status,200);assert.equal(restored.data.events[0].settlement,'paid');
+});

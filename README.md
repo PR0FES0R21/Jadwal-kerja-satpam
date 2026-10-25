@@ -58,3 +58,15 @@ Fitur ini memerlukan internet; data keuangan tidak masuk snapshot offline kalend
 Cadangan JSON keuangan diunduh melalui tombol Cadangkan di halaman keuangan.
 Selisih periode adalah arus kas, bukan saldo rekening. Pembayaran utang uang dicatat
 manual dan tidak mengubah saldo tukar jaga (yang satuannya shift).
+
+### Tukar jaga atau dibayar
+
+Saat mencatat penggantian jaga, pilih **Tukar jaga** (default) atau **Dibayar**.
+Pilihan Dibayar berlaku untuk kedua arah penggantian; kegiatannya tetap terlihat
+pada tanggal mulai di kalender, riwayat dan laporan jam, namun tidak masuk antrean
+utang/piutang atau melunasi utang jaga lain. Nominal uang tetap dicatat manual di
+halaman keuangan. Pilihan ini tidak membuat transaksi keuangan otomatis.
+
+Field opsional `Event.settlement` bernilai `swap` atau `paid`. Catatan dan cadangan
+lama tanpa field ini tetap dihitung sebagai tukar jaga. Edit pilihan menghitung
+ulang saldo dan pasangan FIFO; pembatalan tetap menyimpan riwayat kegiatan.
