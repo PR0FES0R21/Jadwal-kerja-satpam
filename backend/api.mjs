@@ -1,3 +1,4 @@
+import {financeFields} from '../lib/finance.ts';
 import {MongoClient} from 'mongodb';
 import {emptyProfile,profileFields} from '../lib/profile.ts';
 import {emptyData,validateBackup} from '../lib/jaga.ts';
@@ -91,6 +92,32 @@ return async function handleRequest(req){
       return send(200,{user:{username},recoveryCode,sessionToken:await createSession(database,user._id,username)});
     }
     const auth=await authenticate(req,database);
+    if(path==='/finance'&&(method==='GET'||method==='POST')){
+      const ledger=database.collection('finance');
+      if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
+      const input=await body(req);
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel'].includes(input.action)||typeof input.id!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      let fields;if(input.action!=='cancel'){try{fields=financeFields(input.fields);}catch(e){fail(400,e.message);}}
+      const transaction=client.startSession();let result;
+      try{await transaction.withTransaction(async()=>{
+        const options={session:transaction},key='finance:'+auth.userId+':'+input.operationId,fingerprint=digest(JSON.stringify(input));
+        const duplicate=await database.collection('operations').findOne({_id:key},options);
+        if(duplicate){if(duplicate.requestFingerprint!==fingerprint)fail(409,'ID permintaan telah dipakai untuk transaksi berbeda.');result=duplicate.data;return;}
+        const current=await ledger.findOne({_id:auth.userId},options),data=current?.data??{revision:0,entries:[]};
+        if(data.revision!==input.expectedRevision)fail(409,'Catatan berubah di perangkat lain. Muat data terbaru lalu coba simpan kembali.');
+        const old=data.entries.find(e=>e.id===input.id),now=new Date().toISOString();
+        if(input.action==='create'&&old)fail(409,'Transaksi sudah tercatat.');
+        if(input.action!=='create'&&(!old||old.cancelled))fail(404,'Transaksi aktif tidak ditemukan.');
+        if(input.action==='create'&&data.entries.length>=5000)fail(400,'Batas 5.000 transaksi tercapai.');
+        const before=old?Object.fromEntries(['type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
+        const entry={...(old??{}),...(fields??{}),id:input.id,createdAt:old?.createdAt??now,createdBy:old?.createdBy??auth.username,updatedAt:now,updatedBy:auth.username,cancelled:input.action==='cancel',history:[...(old?.history??[]),{at:now,by:auth.username,action:input.action,before}]};
+        result={revision:data.revision+1,entries:[...data.entries.filter(e=>e.id!==input.id),entry]};
+        if(current){const updated=await ledger.updateOne({_id:auth.userId,'data.revision':data.revision},{$set:{data:result}},options);if(updated.matchedCount!==1)fail(409,'Catatan berubah. Muat ulang data.');}
+        else await ledger.insertOne({_id:auth.userId,data:result},options);
+        await database.collection('operations').insertOne({_id:key,userId:auth.userId,requestFingerprint:fingerprint,data:result,createdAt:new Date()},options);
+      },{readConcern:{level:'snapshot'},writeConcern:{w:'majority'}});}finally{await transaction.endSession();}
+      return send(200,{data:result});
+    }
     if(path==='/profile'&&(method==='GET'||method==='PUT')){
       const user=await database.collection('users').findOne({_id:auth.userId});if(!user)fail(401,'Silakan masuk kembali.');
       const current=user.profile??emptyProfile();

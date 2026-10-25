@@ -107,3 +107,34 @@ test('legacy users can initialize profiles and the browser route rejects cross-o
  const response=await browserRequest(req('https://test.invalid'),f.handle,'test-key');assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');assert.equal((await response.json()).profile.revision,1);
  assert.equal((await f.database.collection('users').findOne({_id:'owner'})).profile.displayName,'Legacy User');
 });
+
+test('finance backdating preserves server creation time, actor, audit and account isolation',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
+ const fields={type:'expense',date:'2026-01-01',amount:5000,category:'Minum',description:'Aqua',party:'Warung',method:'Tunai'};
+ const input={action:'create',id:'transaction-00000001',operationId:'operation-00000001',expectedRevision:0,fields};
+ assert.equal((await f.call('/finance')).status,401);
+ const before=Date.now(),r=await f.call('/finance',input,a.sessionToken);assert.equal(r.status,200);
+ const entry=r.data.entries[0];assert.equal(entry.date,'2026-01-01');assert.equal(entry.createdBy,'alice');assert.ok(Date.parse(entry.createdAt)>=before);assert.equal(entry.history.length,1);
+ assert.deepEqual((await f.call('/finance',input,a.sessionToken)).data,r.data);
+ assert.equal((await f.call('/finance',{...input,fields:{...fields,amount:9000}},a.sessionToken)).status,409);
+ assert.deepEqual((await f.call('/finance',undefined,b.sessionToken)).data.entries,[]);
+ assert.equal((await f.call('/finance',{...input,action:'edit'},b.sessionToken)).status,404);
+ const edited=await f.call('/finance',{...input,action:'edit',operationId:'operation-00000002',expectedRevision:1,fields:{...fields,date:'2026-01-02',amount:6000}},a.sessionToken);
+ assert.equal(edited.status,200);assert.equal(edited.data.entries[0].createdAt,entry.createdAt);assert.equal(edited.data.entries[0].history[1].before.amount,5000);
+ assert.equal((await f.call('/finance',{...input,operationId:'operation-00000003',id:'transaction-00000002'},a.sessionToken)).status,409);
+ const cancelled=await f.call('/finance',{action:'cancel',id:input.id,operationId:'operation-00000004',expectedRevision:2},a.sessionToken);
+ assert.equal(cancelled.status,200);assert.equal(cancelled.data.entries[0].cancelled,true);assert.equal(cancelled.data.entries[0].history.length,3);
+ assert.deepEqual((await f.call('/state',undefined,a.sessionToken)).data,emptyData());
+});
+test('finance validates amounts, dates and rejects forged recording metadata; writes are atomic',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'});
+ const fields={type:'income',date:'2026-01-01',amount:700000,category:'Pembayaran utang',description:'Bayar dari teman',party:'Budi',method:'Transfer'};
+ const input={action:'create',id:'transaction-00000001',operationId:'operation-00000001',expectedRevision:0,fields};
+ for(const patch of [{amount:0},{amount:-1},{amount:1.5},{date:'2026-02-30'},{date:'2099-01-01'},{createdAt:'2000-01-01'},{createdBy:'bobby'},{category:'Invalid'}])assert.equal((await f.call('/finance',{...input,fields:{...fields,...patch}},a.sessionToken)).status,400);
+ assert.equal((await f.call('/finance',{...input,userId:'bobby'},a.sessionToken)).status,400);
+ const results=await Promise.all([1,2].map(n=>f.call('/finance',{...input,id:'transaction-0000000'+n,operationId:'operation-0000000'+n},a.sessionToken)));
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+ const req=origin=>new Request('https://test.invalid/api/cloud/finance',{method:'POST',headers:{origin,cookie:'__Host-jaga_session='+a.sessionToken},body:JSON.stringify(input)});
+ assert.equal((await browserRequest(req('https://evil.invalid'),f.handle,'test-key')).status,403);
+ const result=await browserRequest(new Request('https://test.invalid/api/cloud/finance',{headers:{cookie:'__Host-jaga_session='+a.sessionToken}}),f.handle,'test-key');assert.equal(result.status,200);assert.equal((await result.json()).data.entries.length,1);
+});

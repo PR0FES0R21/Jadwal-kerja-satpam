@@ -1,5 +1,5 @@
 export const dynamic='force-dynamic';
-const allowed=new Set(['auth/me','auth/register','auth/recover','auth/login','auth/logout','auth/recovery-key','state','versions','versions/restore']);
+const allowed=new Set(['auth/me','auth/register','auth/recover','auth/login','auth/logout','auth/recovery-key','state','finance','profile','versions','versions/restore']);
 const cookieName='__Host-jaga_session';
 async function proxy(request:Request,context:{params:Promise<{path:string[]}>}){
   const path=(await context.params).path.join('/');

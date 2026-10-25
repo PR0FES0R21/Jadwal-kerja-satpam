@@ -39,3 +39,22 @@ Pembaruan muncul lewat tombol **Perbarui aplikasi**. Tombol menunggu formulir, p
 Tab **Profil** dan avatar di header membuka profil akun aktif. Nama tampilan, regu, tempat kerja, dan bio dapat diedit; username login tetap sama. Informasi disimpan terpisah dari kalender pada akun MongoDB, dengan pemeriksaan revision agar perubahan dari perangkat lain tidak tertimpa. Salinan profil terakhir dapat dilihat offline.
 
 Foto profil hanya disimpan sebagai Blob di IndexedDB browser ini, terpisah berdasarkan username. Foto JPG/PNG/WebP hingga 10 MB dipotong persegi dari tengah dan diperkecil menjadi 512 × 512 sebelum disimpan. Menambah, mengganti, atau menghapus foto tidak mengirim gambar ke API maupun MongoDB, dan dapat dilakukan offline. Foto tetap ada setelah logout sehingga tampil kembali ketika akun yang sama masuk di perangkat ini; akun lain memakai fotonya sendiri. Foto tidak disertakan pada cadangan kalender JSON dan tidak berpindah ke perangkat lain. Penghapusan data browser juga menghapus foto lokal.
+
+### Catatan keuangan
+
+Menu kanan membuka halaman Catatan Keuangan; header kiri menampilkan foto lokal,
+nama tampilan, dan regu. Transaksi mencakup pemasukan/pengeluaran, rupiah bulat,
+kategori, keterangan, pihak terkait, metode pembayaran dan tanggal aktivitas.
+Tanggal baru selalu memakai hari ini dalam Asia/Jakarta dan boleh dimundurkan.
+`createdAt` dan `createdBy` diisi server dari waktu penerimaan dan sesi login;
+edit mempertahankan keduanya serta menambah riwayat perubahan. Pembatalan tidak
+menghapus riwayat dan dikecualikan dari total. Filter/ringkasan memakai tanggal
+aktivitas, bukan tanggal pencatatan.
+
+Endpoint `/api/cloud/finance` menggunakan sesi yang sama, dengan dokumen MongoDB
+`finance` terpisah per user. POST dilindungi transaksi, revision check, validasi
+ketat dan operation ID untuk retry. Tidak perlu environment variable baru.
+Fitur ini memerlukan internet; data keuangan tidak masuk snapshot offline kalender.
+Cadangan JSON keuangan diunduh melalui tombol Cadangkan di halaman keuangan.
+Selisih periode adalah arus kas, bukan saldo rekening. Pembayaran utang uang dicatat
+manual dan tidak mengubah saldo tukar jaga (yang satuannya shift).
