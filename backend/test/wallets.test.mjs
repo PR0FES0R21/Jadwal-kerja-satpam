@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {fixture} from './fixture.mjs';
+import {moneyAccounts,accountBalance,runningBalance,walletAction,syncDutyFinance} from '../../lib/finance.ts';
+const now='2026-10-26T12:00:00Z';
+const legacy={revision:2,opening:{amount:269175,date:'2026-10-26',excludedEntryIds:['old']},entries:[{id:'old',amount:999,type:'income',date:'2026-10-26',createdAt:now,cancelled:false},{id:'new',amount:20000,type:'expense',date:'2026-10-26',createdAt:now,cancelled:false}]};
+test('legacy Mandiri is lossless, additional opening is not income and transfer only spends its fee',()=>{
+ const snapshot=structuredClone(legacy);assert.equal(accountBalance(legacy,'mandiri').current,249175);
+ let book=walletAction(legacy,'account','second',{name:'BCA',kind:'bank',amount:100000,date:'2026-10-26'},'alice',now);
+ assert.equal(runningBalance(book).current,349175);assert.deepEqual(legacy,snapshot);assert.equal(book.entries.length,2);
+ book=walletAction(book,'transfer','transfer',{from:'mandiri',to:'second',amount:50000,fee:2500,date:'2026-10-26'},'alice',now);
+ assert.equal(accountBalance(book,'mandiri').current,196675);assert.equal(accountBalance(book,'second').current,150000);assert.equal(runningBalance(book).current,346675);
+ assert.equal(book.entries.filter(e=>!e.transferId&&e.description==='Biaya admin transfer').length,1);
+ assert.throws(()=>walletAction(book,'archive','second',null,'alice',now),/saldo/i);
+ book=walletAction(book,'cancel_transfer','transfer',null,'alice',now);
+ assert.equal(runningBalance(book).current,349175);assert.equal(book.entries.filter(e=>e.cancelled).length,3);
+ assert.throws(()=>walletAction(book,'transfer','x',{from:'mandiri',to:'second',amount:999999,fee:0,date:'2026-10-26'},'alice',now),/cukup/);
+});
+test('wallet API is scoped, revision protected and retry safe; invalid accounts and dates never write',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
+ let revision=0;const post=async(action,id,fields)=>{const req={action,id,fields,expectedRevision:revision,operationId:randomUUID()};const r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};};
+ const wallet=randomUUID();let {r,req}=await post('account',wallet,{name:'GoPay',kind:'ewallet',amount:30000,date:'2026-10-26'});assert.equal(r.status,200);assert.equal(runningBalance(r.data).current,30000);
+ assert.deepEqual((await f.call('/finance',req,a.sessionToken)).data,r.data);
+ assert.equal(moneyAccounts((await f.call('/finance',undefined,b.sessionToken)).data).length,1);
+ assert.equal((await f.call('/finance',{...req,operationId:randomUUID()},a.sessionToken)).status,409);
+ const fields={type:'expense',date:'2026-10-26',amount:10000,category:'Makan',description:'Makan siang',party:'Warung',method:'QRIS',accountId:wallet};
+ assert.equal((await post('create',randomUUID(),{...fields,accountId:'missing'})).r.status,400);
+ assert.equal((await post('create',randomUUID(),{...fields,date:'2026-10-25'})).r.status,400);
+ r=(await post('create',randomUUID(),fields)).r;assert.equal(r.status,200);assert.equal(accountBalance(r.data,wallet).current,20000);
+ assert.equal((await post('transfer',randomUUID(),{from:wallet,to:wallet,amount:10,fee:0,date:'2026-10-26'})).r.status,400);
+ assert.equal((await f.call('/finance',undefined,a.sessionToken)).data.revision,2);
+});
+test('changing a linked duty wallet survives synchronization without changing its audit or duplicating money',()=>{
+ const state={people:[{id:'p',name:'Budi'}],events:[{id:'e',type:'swap',settlement:'paid',direction:'give',status:'planned',personId:'p',date:'2026-10-27',payment:{date:'2026-10-26',amount:10000}}]};
+ let book=syncDutyFinance({...legacy,entries:[]},state,'alice',now);
+ book=walletAction(book,'account','second',{name:'Tunai',kind:'cash',amount:0,date:'2026-10-26'},'alice',now);
+ book=walletAction(book,'move_account','duty:e',{accountId:'second'},'alice',now);
+ assert.equal(accountBalance(book,'second').current,10000);assert.equal(accountBalance(book,'mandiri').current,269175);
+ assert.equal(syncDutyFinance(book,state,'alice',now),book);
+ state.events[0].payment.amount=20000;book=syncDutyFinance(book,state,'alice',now);
+ assert.equal(accountBalance(book,'second').current,20000);assert.equal(book.entries.length,1);assert.equal(book.entries[0].createdAt,now);
+});
