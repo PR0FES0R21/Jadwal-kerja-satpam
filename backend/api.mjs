@@ -1,7 +1,7 @@
-import {financeFields} from '../lib/finance.ts';
+import {financeFields,openingFields,syncDutyFinance} from '../lib/finance.ts';
 import {MongoClient} from 'mongodb';
 import {emptyProfile,profileFields} from '../lib/profile.ts';
-import {emptyData,validateBackup} from '../lib/jaga.ts';
+import {emptyData,validateBackup,isPaidSwap} from '../lib/jaga.ts';
 import {credentials,hashPassword,verifyPassword,token,digest,safeEqual} from './security.mjs';
 
 const MAX_BYTES=4*1024*1024,SESSION_MS=90*86400000;
@@ -27,7 +27,7 @@ function send(status,value){return Response.json(value,{status,headers:{'cache-c
 async function createSession(database,userId,username){const value=token();await database.collection('sessions').insertOne({_id:digest(value),userId,username,expiresAt:new Date(Date.now()+SESSION_MS),createdAt:new Date()});return value;}
 async function authenticate(req,database){const value=req.headers.get('x-jaga-session');if(typeof value!=='string'||! /^[A-Za-z0-9_-]{43}$/.test(value))fail(401,'Silakan masuk kembali.');const session=await database.collection('sessions').findOne({_id:digest(value),expiresAt:{$gt:new Date()}});if(!session)fail(401,'Sesi telah berakhir. Silakan masuk kembali.');if(session.expiresAt.getTime()-Date.now()<SESSION_MS-86400000)await database.collection('sessions').updateOne({_id:session._id},{$set:{expiresAt:new Date(Date.now()+SESSION_MS)}});return session;}
 async function limitLogin(req,database,username){const ip=String(req.headers.get('x-jaga-client')||'unknown');const id=digest(ip+':'+String(username).toLowerCase());const now=new Date();const attempts=database.collection('login_attempts');await attempts.updateOne({_id:id,expiresAt:{$lte:now}},{$set:{count:0,expiresAt:new Date(Date.now()+15*60000)}});const entry=await attempts.findOneAndUpdate({_id:id},{$inc:{count:1},$setOnInsert:{expiresAt:new Date(Date.now()+15*60000)}},{upsert:true,returnDocument:'after'});if(entry.count>12)fail(429,'Terlalu banyak percobaan. Coba lagi dalam 15 menit.');return id;}
-async function writeState(database,client,userId,next,expected,operationId,requestFingerprint=digest(JSON.stringify(next))){
+async function writeState(database,client,userId,next,expected,operationId,requestFingerprint=digest(JSON.stringify(next)),actor='Pengguna',restoring=false){
   if(!Number.isSafeInteger(expected)||expected<0||typeof operationId!=='string'||! /^[a-f0-9]{64}$/.test(operationId))fail(400,'Versi data tidak valid.');
   try{validateBackup(next);}catch(e){fail(400,e.message);}
   if(next.revision!==expected+1)fail(400,'Versi baru tidak valid.');
@@ -38,6 +38,16 @@ async function writeState(database,client,userId,next,expected,operationId,reque
     if(duplicate){if(duplicate.requestFingerprint!==requestFingerprint)fail(409,'Permintaan simpan berbeda memakai ID yang sama.');result=duplicate.data;return;}
     const current=await database.collection('states').findOne({_id:userId},{session});
     if(!current||current.data.revision!==expected)fail(409,'Catatan berubah di perangkat lain. Muat versi terbaru sebelum menyimpan.');
+    if(!restoring)for(const event of next.events){
+      const old=current.data.events.find(e=>e.id===event.id);
+      if(isPaidSwap(event)&&event.status!=='cancelled'&&!event.payment&&(!old||!isPaidSwap(old)||old.payment))fail(400,'Isi nominal dan tanggal pembayaran jaga.');
+    }
+    const finance=database.collection('finance'),cash=await finance.findOne({_id:userId},{session}),book=cash?.data??{revision:0,entries:[]};
+    let updatedBook;try{updatedBook=syncDutyFinance(book,next,actor,new Date().toISOString());}catch(e){fail(400,e.message);}
+    if(updatedBook!==book){
+      if(cash){const saved=await finance.updateOne({_id:userId,'data.revision':book.revision},{$set:{data:updatedBook}},{session});if(saved.matchedCount!==1)fail(409,'Catatan keuangan berubah. Muat ulang data.');}
+      else await finance.insertOne({_id:userId,data:updatedBook},{session});
+    }
     await database.collection('versions').insertOne({userId,revision:current.data.revision,data:current.data,savedAt:new Date()},{session});
     const updated=await database.collection('states').updateOne({_id:userId,'data.revision':expected},{$set:{data:next,updatedAt:new Date()}},{session});
     if(updated.matchedCount!==1)fail(409,'Versi data telah berubah.');
@@ -96,8 +106,8 @@ return async function handleRequest(req){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
       const input=await body(req);
-      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel'].includes(input.action)||typeof input.id!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
-      let fields;if(input.action!=='cancel'){try{fields=financeFields(input.fields);}catch(e){fail(400,e.message);}}
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening'].includes(input.action)||typeof input.id!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      let fields;if(input.action!=='cancel'){try{fields=input.action==='opening'?openingFields(input.fields):financeFields(input.fields);}catch(e){fail(400,e.message);}}
       const transaction=client.startSession();let result;
       try{await transaction.withTransaction(async()=>{
         const options={session:transaction},key='finance:'+auth.userId+':'+input.operationId,fingerprint=digest(JSON.stringify(input));
@@ -106,12 +116,18 @@ return async function handleRequest(req){
         const current=await ledger.findOne({_id:auth.userId},options),data=current?.data??{revision:0,entries:[]};
         if(data.revision!==input.expectedRevision)fail(409,'Catatan berubah di perangkat lain. Muat data terbaru lalu coba simpan kembali.');
         const old=data.entries.find(e=>e.id===input.id),now=new Date().toISOString();
+        if(old?.sourceEventId)fail(400,'Transaksi ini terhubung dengan jaga. Ubah atau batalkan dari kegiatan asal.');
+        if(input.action==='opening'){
+          if(data.opening)fail(409,'Saldo awal sudah diatur.');
+          result={...data,revision:data.revision+1,opening:{...fields,createdAt:now,createdBy:auth.username,excludedEntryIds:data.entries.filter(e=>e.date<=fields.date).map(e=>e.id)}};
+        }else{
         if(input.action==='create'&&old)fail(409,'Transaksi sudah tercatat.');
         if(input.action!=='create'&&(!old||old.cancelled))fail(404,'Transaksi aktif tidak ditemukan.');
         if(input.action==='create'&&data.entries.length>=5000)fail(400,'Batas 5.000 transaksi tercapai.');
         const before=old?Object.fromEntries(['type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
         const entry={...(old??{}),...(fields??{}),id:input.id,createdAt:old?.createdAt??now,createdBy:old?.createdBy??auth.username,updatedAt:now,updatedBy:auth.username,cancelled:input.action==='cancel',history:[...(old?.history??[]),{at:now,by:auth.username,action:input.action,before}]};
-        result={revision:data.revision+1,entries:[...data.entries.filter(e=>e.id!==input.id),entry]};
+        result={...data,revision:data.revision+1,entries:[...data.entries.filter(e=>e.id!==input.id),entry]};
+        }
         if(current){const updated=await ledger.updateOne({_id:auth.userId,'data.revision':data.revision},{$set:{data:result}},options);if(updated.matchedCount!==1)fail(409,'Catatan berubah. Muat ulang data.');}
         else await ledger.insertOne({_id:auth.userId,data:result},options);
         await database.collection('operations').insertOne({_id:key,userId:auth.userId,requestFingerprint:fingerprint,data:result,createdAt:new Date()},options);
@@ -143,13 +159,13 @@ return async function handleRequest(req){
     }
     if(path==='/auth/logout' &&method==='POST'){await database.collection('sessions').deleteOne({_id:auth._id});return send(200,{ok:true});}
     if(path==='/state'&&method==='GET'){const current=await database.collection('states').findOne({_id:auth.userId});if(!current)fail(503,'Catatan belum siap.');return send(200,{data:current.data});}
-    if(path==='/state'&&method==='PUT'){const input=await body(req);return send(200,{data:await writeState(database,client,auth.userId,input.data,input.expectedRevision,input.operationId)});}
+    if(path==='/state'&&method==='PUT'){const input=await body(req);return send(200,{data:await writeState(database,client,auth.userId,input.data,input.expectedRevision,input.operationId,undefined,auth.username)});}
     if(path==='/versions'&&method==='GET'){const versions=await database.collection('versions').find({userId:auth.userId},{projection:{_id:0,revision:1,savedAt:1,'data.events':1,'data.people':1}}).sort({revision:-1}).limit(30).toArray();return send(200,{versions:versions.map(v=>({revision:v.revision,savedAt:v.savedAt,events:v.data.events.length,people:v.data.people.length}))});}
     if(path==='/versions/restore'&&method==='POST'){
       const input=await body(req);if(!Number.isInteger(input.revision))fail(400,'Pilih versi yang valid.');
       const version=await database.collection('versions').findOne({userId:auth.userId,revision:input.revision});if(!version)fail(404,'Versi tidak ditemukan.');
       const next={...version.data,revision:input.expectedRevision+1,audit:[...version.data.audit,{id:token(),at:new Date().toISOString(),action:'restore_version',before:null,after:{revision:input.revision},reason:'Pemulihan versi'}]};
-      return send(200,{data:await writeState(database,client,auth.userId,next,input.expectedRevision,digest(JSON.stringify(input)),digest('restore:'+JSON.stringify(input)))});
+      return send(200,{data:await writeState(database,client,auth.userId,next,input.expectedRevision,digest(JSON.stringify(input)),digest('restore:'+JSON.stringify(input)),auth.username,true)});
     }
     fail(404,'Halaman tidak ditemukan.');
   }catch(e){if(!e.status)console.error('API failure:',e.name,e.code??'');return send(e.status||503,{error:e.status?e.message:'Penyimpanan belum tersedia. Catatan tidak diubah.'});}

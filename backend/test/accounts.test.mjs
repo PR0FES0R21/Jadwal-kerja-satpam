@@ -1,32 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createAPI} from '../api.mjs';
 import {browserRequest} from '../browser.mjs';
 import {emptyData} from '../../lib/jaga.ts';
+import {runningBalance} from '../../lib/finance.ts';
 import {emptyProfile} from '../../lib/profile.ts';
 import {digest,token,hashPassword} from '../security.mjs';
-// A query-aware database double exercises actual routing, auth, revisions and
-// transactions. No production records or real credentials are used here.
-function fixture(){
- const tables=new Map();let transactionTail=Promise.resolve();
- const get=(v,k)=>k.split('.').reduce((x,n)=>x?.[n],v);
- const match=(v,q)=>Object.entries(q).every(([k,x])=>x&&typeof x==='object'&&!(x instanceof Date)?('$exists'in x?(get(v,k)!==undefined)===x.$exists:'$gt'in x?get(v,k)>x.$gt:'$lte'in x?get(v,k)<=x.$lte:false):get(v,k)===x);
- const set=(v,k,x)=>{const parts=k.split('.');const last=parts.pop();const o=parts.reduce((a,p)=>a[p]??=( {}),v);o[last]=x;};
- const database={collection(name){const rows=tables.get(name)??[];tables.set(name,rows);return {
-  async findOne(q){return structuredClone(rows.find(v=>match(v,q))??null);},
-  async insertOne(v){if(rows.some(r=>r._id===v._id&&v._id!==undefined||name==='users'&&r.username===v.username||name==='versions'&&r.userId===v.userId&&r.revision===v.revision))throw Object.assign(Error('duplicate'),{code:11000});rows.push(structuredClone(v));},
-  async updateOne(q,u,options={}){let v=rows.find(v=>match(v,q));const existed=!!v;if(!v&&options.upsert){v={...q,...u.$setOnInsert};rows.push(v);}if(!v)return {matchedCount:0};for(const [k,x]of Object.entries(u.$set??{}))set(v,k,structuredClone(x));for(const [k,x]of Object.entries(u.$inc??{}))set(v,k,(get(v,k)??0)+x);return {matchedCount:existed?1:0};},
-  async findOneAndUpdate(q,u,o){await this.updateOne(q,u,o);return this.findOne(q);},
-  async deleteOne(q){const n=rows.findIndex(v=>match(v,q));if(n>=0)rows.splice(n,1);},
-  async deleteMany(q){for(let i=rows.length-1;i>=0;i--)if(match(rows[i],q))rows.splice(i,1);},
-  find(q){let a=rows.filter(v=>match(v,q));return {sort(){a.sort((x,y)=>y.revision-x.revision);return this;},limit(n){a=a.slice(0,n);return this;},async toArray(){return structuredClone(a);}}},
- };},async command(){}};
- const client={startSession(){return {async withTransaction(fn){const prev=transactionTail;let done;transactionTail=new Promise(r=>done=r);await prev;const backup=structuredClone([...tables]);try{return await fn();}catch(e){for(const [key,rows]of tables){rows.splice(0,rows.length,...(backup.find(([k])=>k===key)?.[1]??[]));}throw e;}finally{done();}},async endSession(){}};}};
- const handle=createAPI({uri:'test-only',apiKey:'test-key',connectDatabase:async()=>({database,client})});
- async function call(path,body,session,method=body?'POST':'GET'){const headers={authorization:'Bearer test-key','x-jaga-client':'test-ip',...(session?{'x-jaga-session':session}:{}),'content-type':'application/json'};const r=await handle(new Request('https://test.invalid'+path,{headers,method,...(body?{body:JSON.stringify(body)}:{})}));return {status:r.status,...await r.json()};}
- async function save(data,session,expected=0,op=digest('save')){const r=await handle(new Request('https://test.invalid/state',{method:'PUT',headers:{authorization:'Bearer test-key','x-jaga-session':session},body:JSON.stringify({data,expectedRevision:expected,operationId:op})}));return {status:r.status,...await r.json()};}
- return {database,handle,call,save,tables};
-}
+import {fixture} from './fixture.mjs';
 test('public signup, case-insensitive unique usernames, persistent login and logout',async()=>{
  const f=fixture();assert.deepEqual(await f.call('/auth/me'),{status:200,user:null});
  const a=await f.call('/auth/register',{username:'Alice',password:'alice-password-123'});assert.equal(a.status,200);assert.match(a.recoveryCode,/^[A-Za-z0-9_-]{43}$/);
@@ -139,11 +118,12 @@ test('finance validates amounts, dates and rejects forged recording metadata; wr
  const result=await browserRequest(new Request('https://test.invalid/api/cloud/finance',{headers:{cookie:'__Host-jaga_session='+a.sessionToken}}),f.handle,'test-key');assert.equal(result.status,200);assert.equal((await result.json()).data.entries.length,1);
 });
 
-test('paid duty persists per account, validates on server and never creates finance entries',async()=>{
+test('legacy paid duty remains readable without inventing payment amounts',async()=>{
  const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
  const event={id:'duty-paid',type:'swap',personId:'peer',direction:'give',settlement:'paid',date:'2026-01-17',shift:'day',start:'2026-01-17T08:00:00+07:00',end:'2026-01-17T20:00:00+07:00',status:'realized',reason:'',notes:'',created:'2026-01-18T00:00:00Z',revision:1};
  const data={...emptyData(),anchor:'2026-01-12',revision:1,people:[{id:'peer',name:'Rekan',team:'',archived:false}],events:[event]};
- assert.equal((await f.save(data,a.sessionToken)).status,200);
+ const account=f.tables.get('users').find(u=>u.username==='alice');
+ await f.database.collection('states').updateOne({_id:account._id},{$set:{data}});
  assert.deepEqual((await f.call('/state',undefined,a.sessionToken)).data.events,[event]);
  assert.deepEqual((await f.call('/state',undefined,b.sessionToken)).data.events,[]);
  assert.deepEqual((await f.call('/finance',undefined,a.sessionToken)).data.entries,[]);
@@ -153,4 +133,64 @@ test('paid duty persists per account, validates on server and never creates fina
  const swapped={...data,revision:2,events:[{...event,settlement:'swap',revision:2}]};
  assert.equal((await f.save(swapped,a.sessionToken,1,digest('edit-paid'))).status,200);
  const restored=await f.call('/versions/restore',{revision:1,expectedRevision:2},a.sessionToken);assert.equal(restored.status,200);assert.equal(restored.data.events[0].settlement,'paid');
+});
+
+const paidState=()=>({...emptyData(),anchor:'2026-01-12',revision:1,people:[{id:'peer',name:'Budi',team:'A',archived:false}],events:[{id:'paid-event',type:'swap',personId:'peer',direction:'receive',settlement:'paid',payment:{amount:100000,date:'2026-01-12'},date:'2026-01-12',shift:'day',start:'2026-01-12T08:00:00+07:00',end:'2026-01-12T20:00:00+07:00',status:'realized',reason:'',notes:'',created:'2026-01-12T00:00:00Z',revision:1}]});
+test('paid duty creates, edits, cancels and restores one linked cash entry atomically',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
+ let state=paidState();const start=Date.now();
+ assert.equal((await f.save(state,a.sessionToken)).status,200);
+ assert.equal((await f.save(state,a.sessionToken)).status,200);
+ let book=(await f.call('/finance',undefined,a.sessionToken)).data,entry=book.entries[0];
+ assert.equal(book.entries.length,1);assert.equal(book.revision,1);assert.equal(entry.type,'expense');assert.equal(entry.amount,100000);assert.equal(entry.sourceEventId,'paid-event');assert.equal(entry.createdBy,'alice');assert.ok(Date.parse(entry.createdAt)>=start);
+ assert.deepEqual((await f.call('/finance',undefined,b.sessionToken)).data.entries,[]);
+ // Linked entries cannot be edited independently, even through the API.
+ assert.equal((await f.call('/finance',{action:'cancel',id:entry.id,operationId:'operation-cancel-duty',expectedRevision:1},a.sessionToken)).status,400);
+ state={...state,revision:2,events:state.events.map(e=>({...e,payment:{amount:150000,date:'2026-01-11'}}))};
+ assert.equal((await f.save(state,a.sessionToken,1,digest('edit-duty'))).status,200);
+ book=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(book.entries.length,1);assert.equal(book.entries[0].amount,150000);assert.equal(book.entries[0].date,'2026-01-11');assert.equal(book.entries[0].createdAt,entry.createdAt);assert.equal(book.entries[0].history.length,2);
+ const financeFields={type:'expense',date:'2026-01-12',amount:5000,category:'Minum',description:'Aqua',party:'',method:'Tunai'};
+ assert.equal((await f.call('/finance',{action:'create',id:'transaction-00000001',operationId:'operation-stale-cash',expectedRevision:1,fields:financeFields},a.sessionToken)).status,409);
+ // Removing an event via backup restore also cancels its generated cash entry.
+ assert.equal((await f.call('/versions/restore',{revision:0,expectedRevision:2},a.sessionToken)).status,200);
+ book=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(book.entries[0].cancelled,true);
+ assert.equal((await f.call('/versions/restore',{revision:2,expectedRevision:3},a.sessionToken)).status,200);
+ book=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(book.entries.length,1);assert.equal(book.entries[0].cancelled,false);assert.equal(book.entries[0].history.at(-1).action,'restore');
+ state={...(await f.call('/state',undefined,a.sessionToken)).data,revision:5};state.events=state.events.map(({payment,...e})=>({...e,settlement:'swap'}));
+ assert.equal((await f.save(state,a.sessionToken,4,digest('switch-to-swap'))).status,200);
+ assert.equal((await f.call('/finance',undefined,a.sessionToken)).data.entries[0].cancelled,true);
+});
+test('advance income on planned duty records payment now; invalid payment leaves both stores unchanged',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'});
+ let state=paidState();state.events=state.events.map(e=>({...e,direction:'give',date:'2099-01-01',start:'2099-01-01T08:00:00+07:00',end:'2099-01-01T20:00:00+07:00',status:'planned'}));
+ // Use an off day so the extra shift does not overlap the owner's routine.
+ state.anchor='2098-12-28';
+ for(const payment of [undefined,{amount:0,date:'2026-01-12'},{amount:1.1,date:'2026-01-12'},{amount:100,date:'2099-01-01'},{amount:100,date:'2026-02-30'}]){
+  assert.equal((await f.save({...state,events:state.events.map(e=>({...e,payment}))},a.sessionToken)).status,400);
+  assert.deepEqual((await f.call('/finance',undefined,a.sessionToken)).data.entries,[]);
+  assert.equal((await f.call('/state',undefined,a.sessionToken)).data.revision,0);
+ }
+ assert.equal((await f.save(state,a.sessionToken)).status,200);
+ const book=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(book.entries[0].type,'income');assert.equal(book.entries[0].date,'2026-01-12');
+ // Fault after the finance write must roll it back along with the state.
+ const original=f.database.collection;
+ f.database.collection=name=>{const c=original(name);if(name==='versions')c.insertOne=async()=>{throw Error('simulated write failure');};return c;};
+ assert.equal((await f.save({...state,revision:2,events:state.events.map(e=>({...e,payment:{...e.payment,amount:200000}}))},a.sessionToken,1,digest('fail-atomic'))).status,503);
+ assert.deepEqual((await f.call('/finance',undefined,a.sessionToken)).data,book);
+ assert.equal((await f.call('/state',undefined,a.sessionToken)).data.revision,1);
+});
+test('opening balance is account scoped, idempotent, includes historical exclusions and survives writes',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});
+ const fields={type:'income',date:'2026-01-12',amount:700000,category:'Gaji',description:'Gaji lama',party:'',method:'Tunai'};
+ await f.call('/finance',{action:'create',id:'transaction-00000001',operationId:'operation-00000001',expectedRevision:0,fields},a.sessionToken);
+ const input={action:'opening',id:'opening-000000001',operationId:'opening-operation-001',expectedRevision:1,fields:{amount:269175,date:'2026-01-12'}};
+ const r=await f.call('/finance',input,a.sessionToken);assert.equal(r.status,200);assert.equal(r.data.opening.amount,269175);assert.deepEqual(r.data.opening.excludedEntryIds,['transaction-00000001']);assert.equal(r.data.opening.createdBy,'alice');
+ assert.deepEqual((await f.call('/finance',input,a.sessionToken)).data,r.data);
+ assert.equal((await f.call('/finance',{...input,expectedRevision:2,operationId:'opening-operation-002'},a.sessionToken)).status,409);
+ assert.equal((await f.call('/finance',undefined,b.sessionToken)).data.opening,undefined);
+ await f.call('/finance',{action:'create',id:'transaction-00000002',operationId:'operation-00000002',expectedRevision:2,fields:{...fields,date:'2026-01-13',amount:10000}},a.sessionToken);
+ assert.equal((await f.save(paidState(),a.sessionToken)).status,200);
+ const book=(await f.call('/finance',undefined,a.sessionToken)).data;assert.deepEqual(book.opening,r.data.opening);
+ assert.equal(runningBalance(book).current,179175);
+ for(const fields of [{amount:1.5,date:'2026-01-12'},{amount:269175,date:'2099-01-12'},{amount:269175,date:'2026-01-12',createdBy:'alice'}])assert.equal((await f.call('/finance',{...input,expectedRevision:0,fields},b.sessionToken)).status,400);
 });
