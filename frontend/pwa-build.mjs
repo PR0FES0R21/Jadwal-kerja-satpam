@@ -3,7 +3,7 @@ import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 // Every production build precaches the actual hashed assets produced by Vite.
 export function pwaBuild(){let output;
- return {name:'jaga-pwa-build',apply:'build',configResolved(config){output=resolve(config.root,config.build.outDir);},async closeBundle(){
+ return {name:'jaga-pwa-build',apply:'build',configResolved(config){output=resolve(config.root,config.build.outDir);},async writeBundle(){
    const files=await readdir(resolve(output,'assets'),{recursive:true});
    const assets=files.filter(file=>/\.(js|css|woff2?)$/.test(file)).sort().map(file=>'/assets/'+file.replaceAll('\\','/'));
    const template=await readFile(resolve(output,'sw.js'),'utf8'),html=await readFile(resolve(output,'index.html'),'utf8');
