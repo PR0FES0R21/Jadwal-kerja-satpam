@@ -1,10 +1,11 @@
+import type {Loan} from './loans.ts';
 import type {Data} from './jaga.ts';
 import {validDate,today,isPaidSwap} from './jaga.ts';
 export const categories={income:['Gaji','Pembayaran utang','Pemberian','Bonus','Jaga dibayar','Lainnya'],expense:['Makan','Minum','Belanja','Kos','Transportasi','Cicilan','Jaga dibayar','Lainnya']};
 export type FinanceFields={type:'income'|'expense';date:string;amount:number;category:string;description:string;party:string;method:string;accountId?:string};
-export type FinanceEntry=FinanceFields&{id:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
+export type FinanceEntry=FinanceFields&{id:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
 export type OpeningBalance={amount:number;date:string;createdAt:string;createdBy:string;excludedEntryIds:string[]};
-export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[]};
+export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[]};
 export function financeFields(input:unknown):FinanceFields{
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Transaksi tidak valid.');
  const v=input as Record<string,unknown>;
@@ -104,7 +105,7 @@ export function walletAction(book:FinanceData,action:string,id:string,input:any,
  }
  if(action==='move_account'){
   if(!input||Object.keys(input).some(k=>k!=='accountId'))throw Error('Rekening tidak valid.');
-  const e=book.entries.find(e=>e.id===id&&!e.cancelled);if(!e||e.transferId||e.transferFeeFor)throw Error('Transaksi tidak dapat dipindahkan.');requireAccount(book,input.accountId,e.date);
+  const e=book.entries.find(e=>e.id===id&&!e.cancelled);if(!e||e.sourceLoanPaymentId||e.transferId||e.transferFeeFor)throw Error('Transaksi tidak dapat dipindahkan.');requireAccount(book,input.accountId,e.date);
   if(moneyAccounts(book).some(a=>a.id===(e.accountId??'mandiri')&&a.opening&&(a.opening.excludedEntryIds.includes(id)||e.date<a.opening.date)))throw Error('Transaksi ini sudah tercakup dalam saldo awal.');
   return {...book,revision:book.revision+1,entries:book.entries.map(x=>x.id===id?{...x,accountId:input.accountId,updatedAt:now,updatedBy:actor,history:[...x.history,{at:now,by:actor,action:'edit',before:entryFields(x)}]}:x)};
  }

@@ -1,3 +1,4 @@
+import {loanAction} from '../lib/loans.ts';
 import {financeFields,openingFields,syncDutyFinance,walletAction,requireAccount,moneyAccounts} from '../lib/finance.ts';
 import {MongoClient} from 'mongodb';
 import {emptyProfile,profileFields} from '../lib/profile.ts';
@@ -106,8 +107,8 @@ return async function handleRequest(req){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
       const input=await body(req);
-      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
-      const wallet=['account','archive','transfer','cancel_transfer','move_account'].includes(input.action);
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment'].includes(input.action);
       let fields;if(!wallet&&input.action!=='cancel'){try{fields=input.action==='opening'?openingFields(input.fields):financeFields(input.fields);}catch(e){fail(400,e.message);}}
       const transaction=client.startSession();let result;
       try{await transaction.withTransaction(async()=>{
@@ -117,9 +118,10 @@ return async function handleRequest(req){
         const current=await ledger.findOne({_id:auth.userId},options),data=current?.data??{revision:0,entries:[]};
         if(data.revision!==input.expectedRevision)fail(409,'Catatan berubah di perangkat lain. Muat data terbaru lalu coba simpan kembali.');
         const old=data.entries.find(e=>e.id===input.id),now=new Date().toISOString();
+        if(!wallet&&old?.sourceLoanPaymentId)fail(400,'Ubah pembayaran melalui halaman Utang & cicilan.');
         if(!wallet&&(old?.transferId||old?.transferFeeFor))fail(400,'Batalkan transfer secara utuh.');
         if(!wallet&&old?.sourceEventId)fail(400,'Transaksi ini terhubung dengan jaga. Ubah atau batalkan dari kegiatan asal.');
-        if(wallet){try{result=walletAction(data,input.action,input.id,input.fields,auth.username,now);}catch(e){fail(400,e.message);}}else if(input.action==='opening'){
+        if(wallet){try{result=(input.action.startsWith('loan_')?loanAction:walletAction)(data,input.action,input.id,input.fields,auth.username,now);}catch(e){fail(400,e.message);}}else if(input.action==='opening'){
           if(data.opening)fail(409,'Saldo awal sudah diatur.');
           result={...data,revision:data.revision+1,opening:{...fields,createdAt:now,createdBy:auth.username,excludedEntryIds:data.entries.filter(e=>(e.accountId??'mandiri')==='mandiri'&&e.date<=fields.date).map(e=>e.id)}};
         }else{
