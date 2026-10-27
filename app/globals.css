@@ -58,3 +58,5 @@ h1{font-size:26px;letter-spacing:-.8px;font-weight:700}h2{font-size:19px;font-we
 
 .debt-person summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;padding:12px 0}.debt-person summary span{overflow-wrap:anywhere}.debt-totals{display:grid;gap:8px;margin-bottom:12px}.debt-totals span{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted-foreground)}.debt-person{border-top:1px solid var(--border)}.loan-status{grid-template-columns:1fr}.debt-person strong{white-space:nowrap}
 .loans-page>.analytics-summary{margin-bottom:16px}.debt-person summary span{flex:1}.debt-person[open]>summary>svg{transform:rotate(90deg)}
+
+.loan-installment.is-paid{opacity:.65;cursor:default;background:var(--muted)}.loan-actions{position:relative;margin:0!important}.loan-actions summary{list-style:none;cursor:pointer;padding:8px}.loan-actions[open]{padding:8px;border:1px solid var(--border);border-radius:12px}.loan-actions button{display:block;width:100%;text-align:left;padding:8px}.loan-actions summary::-webkit-details-marker{display:none}

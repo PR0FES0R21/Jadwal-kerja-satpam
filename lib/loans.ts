@@ -1,11 +1,11 @@
-import {debtPeople} from './debt.ts';
+import {debtPeople,ownerId as debtOwnerId} from './debt.ts';
 import {today,validDate} from './jaga.ts';
 import {accountBalance,requireAccount,entryFields,type FinanceData,type FinanceEntry} from './finance.ts';
 export type LoanSide='borrower'|'platform';
 export type LoanPayment={id:string;side:LoanSide;date:string;amount:number;allocations:{number:number;amount:number}[];accountId?:string;historical:boolean;note:string;createdAt:string;createdBy:string;cancelled:boolean;cancelledAt?:string;cancelledBy?:string};
-export type Loan={id:string;title:string;borrower:string;ownerId?:string;platform:string;principal:number;monthly:number;tenor:number;date:string;firstDue:string;dueDay?:number;notes:string;createdAt:string;createdBy:string;payments:LoanPayment[]};
+export type Loan={id:string;title:string;borrower:string;ownerId?:string;platform:string;principal:number;monthly:number;tenor:number;date:string;firstDue:string;dueDay?:number;notes:string;createdAt:string;createdBy:string;payments:LoanPayment[];schedule?:{number:number;amount:number;due:string}[];archived?:boolean;history?:{at:string;by:string;action:string;before:any}[]};
 export function dueDate(first:string,offset:number,anchor?:number){const [y,m,d]=first.split('-').map(Number);const last=new Date(Date.UTC(y,m+offset,0)).getUTCDate();return new Date(Date.UTC(y,m-1+offset,Math.min(anchor??d,last))).toISOString().slice(0,10);}
-export function installments(loan:Loan){return Array.from({length:loan.tenor},(_,i)=>{const number=i+1,paid=(side:LoanSide)=>loan.payments.filter(p=>!p.cancelled&&p.side===side).reduce((sum,p)=>sum+p.allocations.filter(a=>a.number===number).reduce((n,a)=>n+a.amount,0),0);const borrowerPaid=paid('borrower'),platformPaid=paid('platform');return {number,due:dueDate(loan.firstDue,i,loan.dueDay),amount:loan.monthly,borrowerPaid,platformPaid,borrowerRemaining:loan.monthly-borrowerPaid,platformRemaining:loan.monthly-platformPaid};});}
+export function installments(loan:Loan){return Array.from({length:loan.tenor},(_,i)=>{const number=i+1,paid=(side:LoanSide)=>loan.payments.filter(p=>!p.cancelled&&p.side===side).reduce((sum,p)=>sum+p.allocations.filter(a=>a.number===number).reduce((n,a)=>n+a.amount,0),0);const borrowerPaid=paid('borrower'),platformPaid=paid('platform'),saved=loan.schedule?.find(r=>r.number===number),amount=saved?.amount??loan.monthly;return {number,due:saved?.due??dueDate(loan.firstDue,i,loan.dueDay),amount,borrowerPaid,platformPaid,borrowerRemaining:amount-borrowerPaid,platformRemaining:amount-platformPaid};});}
 export function loanSummary(loan:Loan,at=today()){const rows=installments(loan);return {borrower:rows.reduce((n,r)=>n+r.borrowerRemaining,0),platform:rows.reduce((n,r)=>n+r.platformRemaining,0),advanced:rows.reduce((n,r)=>n+Math.max(0,r.platformPaid-r.borrowerPaid),0),due:rows.filter(r=>r.due.slice(0,7)===at.slice(0,7)).reduce((n,r)=>n+r.platformRemaining,0),overdue:rows.filter(r=>r.due<at).reduce((n,r)=>n+r.platformRemaining,0)};}
 function object(v:any,keys:string[]){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))throw Error('Kolom pinjaman tidak valid.');}
 function str(v:any,max:number,required=true){if(typeof v!=='string'||v.length>max||/[\u0000-\u001f]/.test(v)||(required&&!v.trim()))throw Error('Isi nama dan keterangan dengan benar.');return v.trim();}
@@ -23,8 +23,25 @@ export function loanAction(book:FinanceData,action:string,id:string,input:any,ac
   const loan:Loan={id,title:str(input.title,100),borrower,ownerId:owner,platform:str(input.platform,100),principal:amount(input.principal),monthly,tenor:input.tenor,date:input.date,firstDue:input.firstDue,dueDay,notes:str(input.notes,1000,false),payments:[],...audit};
   return {...book,revision:book.revision+1,loans:[...loans,loan]};
  }
+ if(action==='loan_edit'||action==='loan_archive'){
+  const old=loans.find(l=>l.id===id);if(!old||old.archived)throw Error('Pinjaman aktif tidak ditemukan.');
+  const {payments,history,...before}=old;let next:Loan;
+  if(action==='loan_archive'){object(input,[]);next={...old,archived:true};}
+  else{
+   object(input,['title','borrower','platform','principal','monthly','tenor','date','firstDue','dueDay','notes']);
+   const temp=loanAction({revision:0,entries:[]},'loan_create',id,{...input,ownerId:old.ownerId==='self'?'self':''},actor,now).loans![0];
+   const rows=installments(old),locked=rows.filter(r=>r.platformPaid>0);
+   if(locked.some(r=>r.number>temp.tenor))throw Error('Tenor tidak boleh menghapus cicilan yang sudah dibayar.');
+   if(old.payments.some(p=>!p.cancelled&&p.date<temp.date))throw Error('Tanggal pinjaman tidak boleh melewati pembayaran yang tercatat.');
+   const schedule=installments(temp).map(r=>{const keep=locked.find(x=>x.number===r.number);return {number:r.number,amount:keep?.amount??r.amount,due:keep?.due??r.due};});
+   if(schedule.some((r,i)=>r.due<temp.date||(i>0&&r.due<=schedule[i-1].due)))throw Error('Jadwal baru harus berurutan setelah tanggal pinjaman; cicilan dibayar tetap terkunci.');
+   amount(schedule.reduce((n,r)=>n+r.amount,0));next={...old,...temp,ownerId:debtOwnerId(book,old),payments:old.payments,createdAt:old.createdAt,createdBy:old.createdBy,schedule};
+  }
+  next.history=[...(old.history??[]),{at:now,by:actor,action,before}];
+  return {...book,revision:book.revision+1,loans:loans.map(l=>l.id===id?next:{...l,ownerId:debtOwnerId(book,l)}),entries:book.entries.map(e=>{if(action!=='loan_edit'||e.debtPersonId||e.type!=='income'||e.category!=='Pembayaran utang')return e;const person=debtPeople(book).find(p=>p.name.trim().replace(/\s+/g,' ').toLowerCase()===e.party.trim().replace(/\s+/g,' ').toLowerCase());return person?{...e,debtPersonId:person.id,updatedAt:now,updatedBy:actor,history:[...(e.history??[]),{at:now,by:actor,action:'edit',before:entryFields(e)}]}:e;})};
+ }
  object(input,action==='loan_pay'?['loanId','side','date','accountId','allocations','historical','note']:['loanId']);
- const loan=loans.find(l=>l.id===input.loanId);if(!loan)throw Error('Pinjaman tidak ditemukan.');
+ const loan=loans.find(l=>l.id===input.loanId);if(!loan)throw Error('Pinjaman tidak ditemukan.');if(loan.archived)throw Error('Pinjaman telah diarsipkan.');
  if(action==='loan_cancel_payment'){
   const old=loan.payments.find(p=>p.id===id&&!p.cancelled);if(!old)throw Error('Pembayaran aktif tidak ditemukan.');
   if(old.side==='borrower'&&!old.historical)throw Error('Batalkan penerimaan ini melalui menu Keuangan.');

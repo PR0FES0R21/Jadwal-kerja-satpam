@@ -108,8 +108,16 @@ return async function handleRequest(req){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
       const input=await body(req);
-      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
-      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment'].includes(input.action);
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields','password'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      if(['loan_edit','loan_archive','loan_cancel_payment'].includes(input.action)){
+        if(typeof input.password!=='string'||!input.password||input.password.length>256)fail(400,'Masukkan password aplikasi.');
+        const attempt=await limitLogin(req,database,auth.username+':loan-change');
+        const user=await database.collection('users').findOne({_id:auth.userId});
+        if(!user||!await verifyPassword(input.password,user.passwordHash))fail(403,'Password salah. Perubahan belum disimpan.');
+        await database.collection('login_attempts').deleteOne({_id:attempt});
+      }
+      delete input.password;
+      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive'].includes(input.action);
       let fields;if(!wallet&&input.action!=='cancel'){try{fields=input.action==='opening'?openingFields(input.fields):financeFields(input.fields);}catch(e){fail(400,e.message);}}
       const transaction=client.startSession();let result;
       try{await transaction.withTransaction(async()=>{

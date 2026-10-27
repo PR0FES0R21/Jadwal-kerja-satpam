@@ -48,7 +48,7 @@ test('historical payments update schedules only and month-end dates recover orig
 });
 test('API payments are atomic, retry-safe, revision-protected, isolated and locked against finance edits',async()=>{
  const f=fixture(),a=await f.call('/auth/register',{username:'alice',password:'alice-password-123'}),b=await f.call('/auth/register',{username:'bobby',password:'bobby-password-123'});let revision=0;
- async function post(action,id,fields){const req={action,id,fields,expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};}
+ async function post(action,id,fields){const req={action,id,fields,...(action==='loan_cancel_payment'?{password:'alice-password-123'}:{}),expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};}
  const loan=randomUUID(),pay=randomUUID();assert.equal((await post('opening',randomUUID(),{amount:150000,date:'2026-10-01'})).r.status,200);
  assert.equal((await post('loan_create',loan,fields)).r.status,200);
  const result=await post('loan_pay',pay,{...payment('platform','mandiri',[{number:1,amount:100000}]),loanId:loan});assert.equal(result.r.status,200);assert.equal(accountBalance(result.r.data,'mandiri').current,50000);
@@ -70,4 +70,24 @@ test('finance receipt create/edit/cancel drives person balance without modifying
  r=await post('edit',rid,{...cash,amount:100000});assert.equal(r.status,200);assert.equal(personDebt(r.data,id).remaining,400000);
  assert.equal((await post('create',randomUUID(),{...cash,debtPersonId:randomUUID()})).status,400);
  r=await post('cancel',rid);assert.equal(r.status,200);assert.equal(personDebt(r.data,id).remaining,500000);
+});
+test('editing preserves paid and partly paid installments; archive preserves cash and audit',()=>{
+ let b=base();b=loanAction(b,'loan_pay','paid',payment('platform','mandiri',[{number:1,amount:100000},{number:2,amount:50000}]),'alice',now);
+ const cash=structuredClone(b.entries);
+ b=loanAction(b,'loan_edit','loan',{...fields,borrower:'Galang corrected',monthly:80000},'alice',now);
+ assert.deepEqual(installments(b.loans[0]).map(r=>r.amount),[100000,100000,80000,80000,80000]);assert.equal(loanSummary(b.loans[0]).platform,290000);assert.deepEqual(b.entries,cash);assert.equal(b.loans[0].history[0].before.borrower,'Galang');
+ assert.throws(()=>loanAction(b,'loan_edit','loan',{...fields,tenor:1},'alice',now));
+ assert.throws(()=>loanAction(b,'loan_pay','double',payment('platform','mandiri',[{number:1,amount:1}]),'alice',now));
+ b=loanAction(b,'loan_archive','loan',{},'alice',now);assert.equal(b.loans[0].archived,true);assert.deepEqual(b.entries,cash);assert.equal(b.loans[0].history.length,2);
+ assert.throws(()=>loanAction(b,'loan_pay','p',payment('platform','mandiri',[{number:3,amount:1}]),'alice',now));
+});
+test('sensitive loan actions require account password and never persist it',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'editor',password:'editor-password-123'});let revision=0;
+ async function post(action,id,fields,password){const req={action,id,fields,password,expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};}
+ const id=randomUUID(),pid=randomUUID();await post('opening',randomUUID(),{amount:200000,date:'2026-10-01'});await post('loan_create',id,fields);await post('loan_pay',pid,{...payment('platform','mandiri',[{number:1,amount:100000}]),loanId:id});
+ for(const [action,target,fields] of [['loan_edit',id,{}],['loan_archive',id,{}],['loan_cancel_payment',pid,{loanId:id}]]){assert.equal((await post(action,target,fields)).r.status,400);assert.equal((await post(action,target,fields,'wrong')).r.status,403);}
+ const edit=await post('loan_edit',id,{...fields,title:'Corrected'},'editor-password-123');assert.equal(edit.r.status,200);assert.equal(JSON.stringify(edit.r.data).includes('editor-password-123'),false);
+ assert.deepEqual((await f.call('/finance',edit.req,a.sessionToken)).data,edit.r.data);
+ assert.equal((await post('loan_cancel_payment',pid,{loanId:id},'editor-password-123')).r.status,200);
+ const archived=await post('loan_archive',id,{},'editor-password-123');assert.equal(archived.r.status,200);assert.equal(accountBalance(archived.r.data,'mandiri').current,200000);
 });
