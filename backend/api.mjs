@@ -1,3 +1,4 @@
+import {receiptFields} from '../lib/debt.ts';
 import {loanAction} from '../lib/loans.ts';
 import {financeFields,openingFields,syncDutyFinance,walletAction,requireAccount,moneyAccounts} from '../lib/finance.ts';
 import {MongoClient} from 'mongodb';
@@ -118,7 +119,7 @@ return async function handleRequest(req){
         const current=await ledger.findOne({_id:auth.userId},options),data=current?.data??{revision:0,entries:[]};
         if(data.revision!==input.expectedRevision)fail(409,'Catatan berubah di perangkat lain. Muat data terbaru lalu coba simpan kembali.');
         const old=data.entries.find(e=>e.id===input.id),now=new Date().toISOString();
-        if(!wallet&&old?.sourceLoanPaymentId)fail(400,'Ubah pembayaran melalui halaman Utang & cicilan.');
+        if(!wallet&&old?.sourceLoanPaymentId&&old.type!=='income')fail(400,'Ubah pembayaran melalui halaman Utang & cicilan.');
         if(!wallet&&(old?.transferId||old?.transferFeeFor))fail(400,'Batalkan transfer secara utuh.');
         if(!wallet&&old?.sourceEventId)fail(400,'Transaksi ini terhubung dengan jaga. Ubah atau batalkan dari kegiatan asal.');
         if(wallet){try{result=(input.action.startsWith('loan_')?loanAction:walletAction)(data,input.action,input.id,input.fields,auth.username,now);}catch(e){fail(400,e.message);}}else if(input.action==='opening'){
@@ -128,8 +129,8 @@ return async function handleRequest(req){
         if(input.action==='create'&&old)fail(409,'Transaksi sudah tercatat.');
         if(input.action!=='create'&&(!old||old.cancelled))fail(404,'Transaksi aktif tidak ditemukan.');
         if(input.action==='create'&&data.entries.length>=5000)fail(400,'Batas 5.000 transaksi tercapai.');
-        if(fields){if(!fields.accountId&&old?.accountId)fields.accountId=old.accountId;try{requireAccount(data,fields.accountId??'mandiri',fields.date);if(old&&(old.accountId??'mandiri')!==(fields.accountId??'mandiri')&&moneyAccounts(data).some(a=>a.id===(old.accountId??'mandiri')&&a.opening&&(a.opening.excludedEntryIds.includes(old.id)||old.date<a.opening.date)))throw Error('Transaksi sudah tercakup saldo awal dan tidak dapat dipindahkan.');}catch(e){fail(400,e.message);}}
-        const before=old?Object.fromEntries(['accountId','type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
+        if(fields){if(!fields.accountId&&old?.accountId)fields.accountId=old.accountId;try{fields=receiptFields(data,fields);requireAccount(data,fields.accountId??'mandiri',fields.date);if(old&&(old.accountId??'mandiri')!==(fields.accountId??'mandiri')&&moneyAccounts(data).some(a=>a.id===(old.accountId??'mandiri')&&a.opening&&(a.opening.excludedEntryIds.includes(old.id)||old.date<a.opening.date)))throw Error('Transaksi sudah tercakup saldo awal dan tidak dapat dipindahkan.');}catch(e){fail(400,e.message);}}
+        const before=old?Object.fromEntries(['debtPersonId','accountId','type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
         const entry={...(old??{}),...(fields??{}),id:input.id,createdAt:old?.createdAt??now,createdBy:old?.createdBy??auth.username,updatedAt:now,updatedBy:auth.username,cancelled:input.action==='cancel',history:[...(old?.history??[]),{at:now,by:auth.username,action:input.action,before}]};
         result={...data,revision:data.revision+1,entries:[...data.entries.filter(e=>e.id!==input.id),entry]};
         }
