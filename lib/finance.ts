@@ -5,7 +5,7 @@ import type {Data} from './jaga.ts';
 import {validDate,today,isPaidSwap} from './jaga.ts';
 export const categories={income:['Gaji','Pembayaran utang','Pemberian','Bonus','Jaga dibayar','Lainnya'],expense:['Makan','Minum','Belanja','Kos','Transportasi','Cicilan','Jaga dibayar','Lainnya']};
 export type FinanceFields={type:'income'|'expense';date:string;amount:number;category:string;description:string;party:string;method:string;accountId?:string;debtPersonId?:string;transactionKind?:string};
-export type FinanceEntry=FinanceFields&{id:string;sourcePayLaterPaymentId?:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
+export type FinanceEntry=FinanceFields&{id:string;sourcePayLaterPurchaseId?:string;sourcePayLaterPaymentId?:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
 export type OpeningBalance={amount:number;date:string;createdAt:string;createdBy:string;excludedEntryIds:string[]};
 export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[];payLaterAccounts?:PayLaterAccount[];payLaterPurchases?:PayLaterPurchase[];payLaterPayments?:PayLaterPayment[]};
 export function financeFields(input:unknown):FinanceFields{
