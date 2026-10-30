@@ -1,12 +1,13 @@
 import {validDate} from './jaga.ts';
 import type {FinanceData,FinanceEntry} from './finance.ts';
 export type AnalyticsFilter={from:string;to:string;account:string;category:string};
-export type Preset='month'|'lastMonth'|'quarter'|'year'|'custom';
+export type Preset='today'|'month'|'lastMonth'|'quarter'|'year'|'custom';
 const iso=(d:Date)=>d.toISOString().slice(0,10);
 const day=(s:string)=>new Date(s+'T00:00:00Z');
 const monthStart=(s:string,offset=0)=>{const d=day(s);return iso(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+offset,1)));};
 const monthEnd=(s:string)=>{const d=day(s);return iso(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)));};
 export function presetRange(p:Preset,now:string){
+ if(p==='today')return {from:now,to:now};
  if(p==='lastMonth'){const from=monthStart(now,-1);return {from,to:monthEnd(from)};}
  return {from:p==='quarter'?monthStart(now,-2):p==='year'?now.slice(0,4)+'-01-01':monthStart(now),to:now};
 }

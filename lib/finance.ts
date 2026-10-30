@@ -7,7 +7,7 @@ export const categories={income:['Gaji','Pembayaran utang','Pemberian','Bonus','
 export type FinanceFields={type:'income'|'expense';date:string;amount:number;category:string;description:string;party:string;method:string;accountId?:string;debtPersonId?:string;transactionKind?:string};
 export type FinanceEntry=FinanceFields&{id:string;sourcePayLaterPurchaseId?:string;sourcePayLaterPaymentId?:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
 export type OpeningBalance={amount:number;date:string;createdAt:string;createdBy:string;excludedEntryIds:string[]};
-export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[];payLaterAccounts?:PayLaterAccount[];payLaterPurchases?:PayLaterPurchase[];payLaterPayments?:PayLaterPayment[]};
+export type FinanceData={snapshotBalances?:Record<string,number|null>;revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[];payLaterAccounts?:PayLaterAccount[];payLaterPurchases?:PayLaterPurchase[];payLaterPayments?:PayLaterPayment[]};
 export function financeFields(input:unknown):FinanceFields{
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Transaksi tidak valid.');
  const v=input as Record<string,unknown>;
@@ -66,7 +66,8 @@ function singleBalance(book:FinanceData){
 export type MoneyAccount={id:string;name:string;kind:'bank'|'ewallet'|'cash';opening?:OpeningBalance;archived?:boolean};
 // Legacy records belong to Mandiri. This projection never rewrites their audit.
 export function moneyAccounts(book:FinanceData):MoneyAccount[]{return [{id:'mandiri',name:'Bank Mandiri',kind:'bank',opening:book.opening},...(book.accounts??[])];}
-export function accountBalance(book:FinanceData,id:string){const account=moneyAccounts(book).find(a=>a.id===id);return singleBalance({...book,opening:account?.opening,entries:book.entries.filter(e=>(e.accountId??'mandiri')===id)});}
+export function accountBalance(book:FinanceData,id:string){
+ if(book.snapshotBalances)return {current:book.snapshotBalances[id]??null,balances:{} as Record<string,number>};const account=moneyAccounts(book).find(a=>a.id===id);return singleBalance({...book,opening:account?.opening,entries:book.entries.filter(e=>(e.accountId??'mandiri')===id)});}
 export function runningBalance(book:FinanceData){
  const accounts=moneyAccounts(book),results=accounts.map(a=>accountBalance(book,a.id));
  return {current:results.some(r=>r.current!==null)?results.reduce((n,r)=>n+(r.current??0),0):null,balances:Object.assign({},...results.map(r=>r.balances)) as Record<string,number>};

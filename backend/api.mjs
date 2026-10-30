@@ -1,5 +1,8 @@
+import {financeAnalytics} from '../lib/analytics.ts';
+import {today} from '../lib/jaga.ts';
+import {financeView} from '../lib/finance-view.ts';
 import {payLaterAction} from '../lib/paylater.ts';
-import {receiptFields} from '../lib/debt.ts';
+import {debtPeople,personDebt,receiptFields} from '../lib/debt.ts';
 import {loanAction} from '../lib/loans.ts';
 import {financeFields,openingFields,syncDutyFinance,walletAction,requireAccount,moneyAccounts} from '../lib/finance.ts';
 import {MongoClient} from 'mongodb';
@@ -105,6 +108,13 @@ return async function handleRequest(req){
       return send(200,{user:{username},recoveryCode,sessionToken:await createSession(database,user._id,username)});
     }
     const auth=await authenticate(req,database);
+    if(path==='/finance/report'&&method==='GET'){
+      const current=await database.collection('finance').findOne({_id:auth.userId}),book=current?.data??{revision:0,entries:[]},q=new URL(req.url).searchParams;
+      try{const filter={from:q.get('from')||today(),to:q.get('to')||today(),account:q.get('account')||'all',category:q.get('category')||'all'},r=financeAnalytics(book,filter,q.get('preset')||'custom',today());
+      const strip=g=>{const {entries,...rest}=g;return {...rest,count:entries.length};};const {entries,creditPurchases,...rest}=r;
+      return send(200,{report:{...rest,people:debtPeople(book).map(p=>{const d=personDebt(book,p.id);return {name:p.name,total:d.total,received:d.received,remaining:d.remaining};}),count:entries.length,sources:r.sources.map(strip),spending:r.spending.map(strip),months:r.months.map(strip),creditCount:creditPurchases.length},data:financeView(book,new URLSearchParams()).data});}catch(e){fail(400,e.message);}
+    }
+    if(path==='/finance/view'&&method==='GET'){const current=await database.collection('finance').findOne({_id:auth.userId});try{return send(200,financeView(current?.data??{revision:0,entries:[]},new URL(req.url).searchParams));}catch(e){fail(400,e.message);}}
     if(path==='/finance'&&(method==='GET'||method==='POST')){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
