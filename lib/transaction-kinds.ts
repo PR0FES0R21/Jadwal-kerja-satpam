@@ -1,0 +1,1 @@
+export const transactionKinds:Record<string,string[]>={Transportasi:['Kereta','Ojol','Pesawat','Bus','Parkir','Bensin'],Makan:['Makanan'],Minum:['Kopi','Minuman'],Belanja:['Pakaian','Elektronik','Rumah']};

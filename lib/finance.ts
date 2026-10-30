@@ -1,15 +1,17 @@
+import {transactionKinds} from './transaction-kinds.ts';
+import type {PayLaterAccount,PayLaterPurchase,PayLaterPayment} from './paylater.ts';
 import type {Loan} from './loans.ts';
 import type {Data} from './jaga.ts';
 import {validDate,today,isPaidSwap} from './jaga.ts';
 export const categories={income:['Gaji','Pembayaran utang','Pemberian','Bonus','Jaga dibayar','Lainnya'],expense:['Makan','Minum','Belanja','Kos','Transportasi','Cicilan','Jaga dibayar','Lainnya']};
-export type FinanceFields={type:'income'|'expense';date:string;amount:number;category:string;description:string;party:string;method:string;accountId?:string;debtPersonId?:string};
-export type FinanceEntry=FinanceFields&{id:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
+export type FinanceFields={type:'income'|'expense';date:string;amount:number;category:string;description:string;party:string;method:string;accountId?:string;debtPersonId?:string;transactionKind?:string};
+export type FinanceEntry=FinanceFields&{id:string;sourcePayLaterPaymentId?:string;sourceLoanPaymentId?:string;sourceLoanId?:string;transferId?:string;transferFeeFor?:string;sourceEventId?:string;createdAt:string;createdBy:string;updatedAt:string;updatedBy:string;cancelled:boolean;history:{at:string;by:string;action:string;before:FinanceFields|null}[]};
 export type OpeningBalance={amount:number;date:string;createdAt:string;createdBy:string;excludedEntryIds:string[]};
-export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[]};
+export type FinanceData={revision:number;entries:FinanceEntry[];opening?:OpeningBalance;accounts?:MoneyAccount[];loans?:Loan[];payLaterAccounts?:PayLaterAccount[];payLaterPurchases?:PayLaterPurchase[];payLaterPayments?:PayLaterPayment[]};
 export function financeFields(input:unknown):FinanceFields{
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Transaksi tidak valid.');
  const v=input as Record<string,unknown>;
- if(Object.keys(v).some(k=>!['type','date','amount','category','description','party','method','accountId','debtPersonId'].includes(k)))throw Error('Kolom transaksi tidak valid.');
+ if(Object.keys(v).some(k=>!['type','date','amount','category','description','party','method','accountId','debtPersonId','transactionKind'].includes(k)))throw Error('Kolom transaksi tidak valid.');
  if(v.type!=='income'&&v.type!=='expense')throw Error('Pilih jenis transaksi.');
  if(typeof v.date!=='string'||!validDate(v.date)||v.date>today())throw Error('Pilih tanggal aktivitas yang valid, maksimal hari ini (WIB).');
  if(!Number.isSafeInteger(v.amount)||(v.amount as number)<=0||(v.amount as number)>1_000_000_000_000)throw Error('Nominal harus rupiah bulat, lebih dari nol, maksimal 1 triliun.');
@@ -17,7 +19,8 @@ export function financeFields(input:unknown):FinanceFields{
  if(!categories[v.type].includes(v.category as string)||!(v.description as string).trim())throw Error('Isi kategori dan keterangan transaksi.');
  if(v.accountId!==undefined&&(typeof v.accountId!=='string'||! /^[a-zA-Z0-9-]{1,80}$/.test(v.accountId)))throw Error('Rekening tidak valid.');
  if(v.debtPersonId!==undefined&&(typeof v.debtPersonId!=='string'||v.debtPersonId.length>80||! /^[a-zA-Z0-9-]*$/.test(v.debtPersonId)))throw Error('Pembayar tidak valid.');
- return {debtPersonId:(v.debtPersonId as string)||'',...(v.accountId?{accountId:v.accountId as string}:{}),type:v.type,date:v.date,amount:v.amount as number,category:v.category as string,description:(v.description as string).trim(),party:(v.party as string).trim(),method:(v.method as string).trim()};
+ if(v.transactionKind!==undefined&&(typeof v.transactionKind!=='string'||v.transactionKind&&!transactionKinds[v.category as string]?.includes(v.transactionKind)))throw Error('Jenis transaksi tidak sesuai kategori.');
+ return {transactionKind:(v.transactionKind as string)||'',debtPersonId:(v.debtPersonId as string)||'',...(v.accountId?{accountId:v.accountId as string}:{}),type:v.type,date:v.date,amount:v.amount as number,category:v.category as string,description:(v.description as string).trim(),party:(v.party as string).trim(),method:(v.method as string).trim()};
 }
 
 export function openingFields(input:unknown):{amount:number;date:string}{
@@ -26,7 +29,7 @@ export function openingFields(input:unknown):{amount:number;date:string}{
  if(Object.keys(v).some(k=>!['amount','date'].includes(k))||!Number.isSafeInteger(v.amount)||Math.abs(v.amount as number)>1_000_000_000_000||typeof v.date!=='string'||!validDate(v.date)||v.date>today())throw Error('Isi saldo awal rupiah bulat dan tanggal maksimal hari ini (WIB).');
  return {amount:v.amount as number,date:v.date};
 }
-export const entryFields=(entry:FinanceEntry):FinanceFields=>({...(entry.debtPersonId?{debtPersonId:entry.debtPersonId}:{}),type:entry.type,date:entry.date,amount:entry.amount,category:entry.category,description:entry.description,party:entry.party,method:entry.method,...(entry.accountId?{accountId:entry.accountId}:{})});
+export const entryFields=(entry:FinanceEntry):FinanceFields=>({...(entry.transactionKind?{transactionKind:entry.transactionKind}:{}),...(entry.debtPersonId?{debtPersonId:entry.debtPersonId}:{}),type:entry.type,date:entry.date,amount:entry.amount,category:entry.category,description:entry.description,party:entry.party,method:entry.method,...(entry.accountId?{accountId:entry.accountId}:{})});
 // The same event always owns the same cash entry. Run inside the state transaction.
 export function syncDutyFinance(book:FinanceData,state:Data,actor:string,now:string):FinanceData{
  const desired=new Map<string,FinanceFields>();
@@ -106,7 +109,7 @@ export function walletAction(book:FinanceData,action:string,id:string,input:any,
  }
  if(action==='move_account'){
   if(!input||Object.keys(input).some(k=>k!=='accountId'))throw Error('Rekening tidak valid.');
-  const e=book.entries.find(e=>e.id===id&&!e.cancelled);if(!e||e.sourceLoanPaymentId||e.transferId||e.transferFeeFor)throw Error('Transaksi tidak dapat dipindahkan.');requireAccount(book,input.accountId,e.date);
+  const e=book.entries.find(e=>e.id===id&&!e.cancelled);if(!e||e.sourceLoanPaymentId||e.sourcePayLaterPaymentId||e.transferId||e.transferFeeFor)throw Error('Transaksi tidak dapat dipindahkan.');requireAccount(book,input.accountId,e.date);
   if(moneyAccounts(book).some(a=>a.id===(e.accountId??'mandiri')&&a.opening&&(a.opening.excludedEntryIds.includes(id)||e.date<a.opening.date)))throw Error('Transaksi ini sudah tercakup dalam saldo awal.');
   return {...book,revision:book.revision+1,entries:book.entries.map(x=>x.id===id?{...x,accountId:input.accountId,updatedAt:now,updatedBy:actor,history:[...x.history,{at:now,by:actor,action:'edit',before:entryFields(x)}]}:x)};
  }

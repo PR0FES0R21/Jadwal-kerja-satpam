@@ -1,0 +1,5 @@
+import {TrainFront,Bike,Plane,Bus,ParkingCircle,Fuel,Utensils,Coffee,GlassWater,ShoppingBag,Shirt,Monitor,House,Wallet,HandCoins,Gift,ArrowDownLeft,ArrowUpRight,ArrowLeftRight,CreditCard} from 'lucide-react';
+import type {FinanceEntry} from '@/lib/finance';
+const icons:Record<string,typeof Wallet>={Kereta:TrainFront,Ojol:Bike,Pesawat:Plane,Bus,Parkir:ParkingCircle,Bensin:Fuel,Makanan:Utensils,Kopi:Coffee,Minuman:GlassWater,Pakaian:Shirt,Elektronik:Monitor,Rumah:House,Makan:Utensils,Minum:GlassWater,Belanja:ShoppingBag,Transportasi:Bus,Kos:House,Gaji:Wallet,'Pembayaran utang':HandCoins,Pemberian:Gift,Bonus:Gift,Cicilan:CreditCard};
+export function TransactionIcon({entry:e}:{entry:FinanceEntry}){const Icon=e.transferId?ArrowLeftRight:icons[e.transactionKind??'']??icons[e.category]??(e.type==='income'?ArrowDownLeft:ArrowUpRight);return <Icon size={20} aria-hidden="true"/>;}
+export function KindIcon({kind}:{kind:string}){const Icon=icons[kind]??Wallet;return <Icon size={16} aria-hidden="true"/>;}

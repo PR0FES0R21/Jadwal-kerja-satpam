@@ -1,3 +1,4 @@
+import {payLaterAction} from '../lib/paylater.ts';
 import {receiptFields} from '../lib/debt.ts';
 import {loanAction} from '../lib/loans.ts';
 import {financeFields,openingFields,syncDutyFinance,walletAction,requireAccount,moneyAccounts} from '../lib/finance.ts';
@@ -108,8 +109,8 @@ return async function handleRequest(req){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
       const input=await body(req);
-      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields','password'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
-      if(['loan_edit','loan_archive','loan_cancel_payment'].includes(input.action)){
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_cancel_payment'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields','password'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      if(['loan_edit','loan_archive','loan_cancel_payment','pl_edit_account','pl_edit_purchase','pl_cancel_purchase','pl_cancel_payment'].includes(input.action)){
         if(typeof input.password!=='string'||!input.password||input.password.length>256)fail(400,'Masukkan password aplikasi.');
         const attempt=await limitLogin(req,database,auth.username+':loan-change');
         const user=await database.collection('users').findOne({_id:auth.userId});
@@ -117,7 +118,7 @@ return async function handleRequest(req){
         await database.collection('login_attempts').deleteOne({_id:attempt});
       }
       delete input.password;
-      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive'].includes(input.action);
+      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_pay','loan_cancel_payment','loan_edit','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_cancel_payment'].includes(input.action);
       let fields;if(!wallet&&input.action!=='cancel'){try{fields=input.action==='opening'?openingFields(input.fields):financeFields(input.fields);}catch(e){fail(400,e.message);}}
       const transaction=client.startSession();let result;
       try{await transaction.withTransaction(async()=>{
@@ -127,10 +128,11 @@ return async function handleRequest(req){
         const current=await ledger.findOne({_id:auth.userId},options),data=current?.data??{revision:0,entries:[]};
         if(data.revision!==input.expectedRevision)fail(409,'Catatan berubah di perangkat lain. Muat data terbaru lalu coba simpan kembali.');
         const old=data.entries.find(e=>e.id===input.id),now=new Date().toISOString();
+        if(!wallet&&old?.sourcePayLaterPaymentId)fail(400,'Ubah pembayaran melalui halaman PayLater.');
         if(!wallet&&old?.sourceLoanPaymentId&&old.type!=='income')fail(400,'Ubah pembayaran melalui halaman Utang & cicilan.');
         if(!wallet&&(old?.transferId||old?.transferFeeFor))fail(400,'Batalkan transfer secara utuh.');
         if(!wallet&&old?.sourceEventId)fail(400,'Transaksi ini terhubung dengan jaga. Ubah atau batalkan dari kegiatan asal.');
-        if(wallet){try{result=(input.action.startsWith('loan_')?loanAction:walletAction)(data,input.action,input.id,input.fields,auth.username,now);}catch(e){fail(400,e.message);}}else if(input.action==='opening'){
+        if(wallet){try{result=(input.action.startsWith('pl_')?payLaterAction:input.action.startsWith('loan_')?loanAction:walletAction)(data,input.action,input.id,input.fields,auth.username,now);}catch(e){fail(400,e.message);}}else if(input.action==='opening'){
           if(data.opening)fail(409,'Saldo awal sudah diatur.');
           result={...data,revision:data.revision+1,opening:{...fields,createdAt:now,createdBy:auth.username,excludedEntryIds:data.entries.filter(e=>(e.accountId??'mandiri')==='mandiri'&&e.date<=fields.date).map(e=>e.id)}};
         }else{
@@ -138,7 +140,7 @@ return async function handleRequest(req){
         if(input.action!=='create'&&(!old||old.cancelled))fail(404,'Transaksi aktif tidak ditemukan.');
         if(input.action==='create'&&data.entries.length>=5000)fail(400,'Batas 5.000 transaksi tercapai.');
         if(fields){if(!fields.accountId&&old?.accountId)fields.accountId=old.accountId;try{fields=receiptFields(data,fields);requireAccount(data,fields.accountId??'mandiri',fields.date);if(old&&(old.accountId??'mandiri')!==(fields.accountId??'mandiri')&&moneyAccounts(data).some(a=>a.id===(old.accountId??'mandiri')&&a.opening&&(a.opening.excludedEntryIds.includes(old.id)||old.date<a.opening.date)))throw Error('Transaksi sudah tercakup saldo awal dan tidak dapat dipindahkan.');}catch(e){fail(400,e.message);}}
-        const before=old?Object.fromEntries(['debtPersonId','accountId','type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
+        const before=old?Object.fromEntries(['transactionKind','debtPersonId','accountId','type','date','amount','category','description','party','method'].map(k=>[k,old[k]])):null;
         const entry={...(old??{}),...(fields??{}),id:input.id,createdAt:old?.createdAt??now,createdBy:old?.createdBy??auth.username,updatedAt:now,updatedBy:auth.username,cancelled:input.action==='cancel',history:[...(old?.history??[]),{at:now,by:auth.username,action:input.action,before}]};
         result={...data,revision:data.revision+1,entries:[...data.entries.filter(e=>e.id!==input.id),entry]};
         }
