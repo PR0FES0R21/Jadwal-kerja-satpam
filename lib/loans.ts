@@ -12,8 +12,20 @@ function str(v:any,max:number,required=true){if(typeof v!=='string'||v.length>ma
 function amount(v:any){if(!Number.isSafeInteger(v)||v<=0||v>1e12)throw Error('Nominal harus rupiah bulat, lebih dari nol, maksimal 1 triliun.');return v as number;}
 export function loanAction(book:FinanceData,action:string,id:string,input:any,actor:string,now:string):FinanceData{
  const loans=book.loans??[],audit={createdAt:now,createdBy:actor};
+ if(action==='loan_opening'){
+  object(input,['loanId','date','platform','receipts','note']);
+  const loan=loans.find(l=>l.id===input.loanId);if(!loan||loan.archived)throw Error('Pinjaman aktif tidak ditemukan.');
+  if(!Array.isArray(input.platform)||!Array.isArray(input.receipts)||(!input.platform.length&&!input.receipts.length))throw Error('Isi pembayaran sebelumnya.');
+  if(loan.ownerId==='self'&&input.receipts.length)throw Error('Hutang sendiri tidak memiliki pembayaran dari pemilik hutang.');
+  const rows=installments(loan);let next=book;
+  const platform=input.platform.map((number:number)=>({number,amount:rows.find(r=>r.number===number)?.platformRemaining??0}));
+  for(const [side,allocations] of [['platform',platform],['borrower',input.receipts]] as const){
+   if(allocations.length)next=loanAction(next,'loan_pay',id+'-'+side,{loanId:loan.id,side,date:input.date,historical:true,note:input.note,allocations},actor,now);
+  }
+  return {...next,revision:book.revision+1};
+ }
  if(action==='loan_create'){
-  object(input,['title','borrower','platform','principal','monthly','tenor','date','firstDue','dueDay','notes','ownerId']);
+  object(input,['title','borrower','platform','principal','monthly','tenor','date','firstDue','dueDay','notes','ownerId','opening']);
   if(loans.length>=200||loans.some(l=>l.id===id))throw Error('Pinjaman sudah ada atau batas 200 pinjaman tercapai.');
   if(!Number.isInteger(input.tenor)||input.tenor<1||input.tenor>120)throw Error('Tenor 1–120 bulan.');
   if(!validDate(input.date)||input.date>today()||!validDate(input.firstDue)||input.firstDue<input.date||!validDate(dueDate(input.firstDue,input.tenor-1)))throw Error('Periksa tanggal pinjaman dan jatuh tempo pertama.');
@@ -21,7 +33,9 @@ export function loanAction(book:FinanceData,action:string,id:string,input:any,ac
   const monthly=amount(input.monthly);amount(monthly*input.tenor);
   const people=debtPeople(book);const person=input.ownerId&&input.ownerId!=='self'?people.find(p=>p.id===input.ownerId):undefined;if(input.ownerId&&input.ownerId!=='self'&&!person)throw Error('Pemilik hutang tidak ditemukan.');const borrower=input.ownerId==='self'?'Saya':person?.name??str(input.borrower,100);const owner=input.ownerId||people.find(p=>p.name.trim().toLowerCase()===borrower.trim().toLowerCase())?.id||id;
   const loan:Loan={id,title:str(input.title,100),borrower,ownerId:owner,platform:str(input.platform,100),principal:amount(input.principal),monthly,tenor:input.tenor,date:input.date,firstDue:input.firstDue,dueDay,notes:str(input.notes,1000,false),payments:[],...audit};
-  return {...book,revision:book.revision+1,loans:[...loans,loan]};
+  const next={...book,revision:book.revision+1,loans:[...loans,loan]};
+  if(input.opening!==undefined){object(input.opening,['date','platform','receipts','note']);return {...loanAction(next,'loan_opening',id+'-initial',{...input.opening,loanId:id},actor,now),revision:next.revision};}
+  return next;
  }
  if(action==='loan_edit'||action==='loan_archive'){
   const old=loans.find(l=>l.id===id);if(!old||old.archived)throw Error('Pinjaman aktif tidak ditemukan.');
@@ -30,7 +44,7 @@ export function loanAction(book:FinanceData,action:string,id:string,input:any,ac
   else{
    object(input,['title','borrower','platform','principal','monthly','tenor','date','firstDue','dueDay','notes']);
    const temp=loanAction({revision:0,entries:[]},'loan_create',id,{...input,ownerId:old.ownerId==='self'?'self':''},actor,now).loans![0];
-   const rows=installments(old),locked=rows.filter(r=>r.platformPaid>0);
+   const rows=installments(old),locked=rows.filter(r=>r.platformPaid>0||r.borrowerPaid>0);
    if(locked.some(r=>r.number>temp.tenor))throw Error('Tenor tidak boleh menghapus cicilan yang sudah dibayar.');
    if(old.payments.some(p=>!p.cancelled&&p.date<temp.date))throw Error('Tanggal pinjaman tidak boleh melewati pembayaran yang tercatat.');
    const schedule=installments(temp).map(r=>{const keep=locked.find(x=>x.number===r.number);return {number:r.number,amount:keep?.amount??r.amount,due:keep?.due??r.due};});
@@ -47,7 +61,7 @@ export function loanAction(book:FinanceData,action:string,id:string,input:any,ac
   if(old.side==='borrower'&&!old.historical)throw Error('Batalkan penerimaan ini melalui menu Keuangan.');
   return {...book,revision:book.revision+1,loans:loans.map(l=>l.id===loan.id?{...l,payments:l.payments.map(p=>p.id===id?{...p,cancelled:true,cancelledAt:now,cancelledBy:actor}:p)}:l),entries:book.entries.map(e=>e.sourceLoanPaymentId===id?{...e,cancelled:true,updatedAt:now,updatedBy:actor,history:[...e.history,{at:now,by:actor,action:'cancel',before:entryFields(e)}]}:e)};
  }
- if(input.side==='borrower')throw Error('Catat penerimaan pembayaran hutang di menu Keuangan.');
+ if(input.side==='borrower'&&(!input.historical||loan.ownerId==='self'))throw Error('Catat penerimaan pembayaran hutang di menu Keuangan.');
  if(action!=='loan_pay')throw Error('Tindakan pinjaman tidak valid.');
  if(loans.some(l=>l.payments.some(p=>p.id===id))||book.entries.some(e=>e.id===id))throw Error('Pembayaran sudah tercatat.');
  if(!['borrower','platform'].includes(input.side)||typeof input.historical!=='boolean'||!validDate(input.date)||input.date>today()||input.date<loan.date)throw Error('Periksa jenis dan tanggal pembayaran.');

@@ -296,3 +296,13 @@ h1{font-size:26px;letter-spacing:-.8px;font-weight:700}h2{font-size:19px;font-we
   .profile-summary-copy h2 { font-size:16px; }
   .calendar-shortcut { padding:12px; }
 }
+
+/* Opening payments keep platform settlement separate from historical receipts. */
+.opening-payments{display:grid;gap:16px;min-width:0}
+.opening-payments>.muted{font-size:12px;line-height:1.6}
+.opening-payment-list{display:grid;gap:10px;max-height:360px;overflow:auto;padding:2px}
+.opening-payment-row{display:grid;gap:12px;padding:14px;border:1px solid var(--border);border-radius:16px;background:var(--surface)}
+.opening-payment-row strong{font-size:14px}
+.opening-payment-row small{display:block;font-size:11px;color:var(--muted-text);margin-top:3px}
+.opening-payment-row label{font-size:12px}
+.opening-payment-row .loan-checkbox{display:flex;flex-direction:row;align-items:center;min-height:44px}

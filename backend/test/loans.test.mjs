@@ -85,9 +85,36 @@ test('sensitive loan actions require account password and never persist it',asyn
  const f=fixture(),a=await f.call('/auth/register',{username:'editor',password:'editor-password-123'});let revision=0;
  async function post(action,id,fields,password){const req={action,id,fields,password,expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};}
  const id=randomUUID(),pid=randomUUID();await post('opening',randomUUID(),{amount:200000,date:'2026-10-01'});await post('loan_create',id,fields);await post('loan_pay',pid,{...payment('platform','mandiri',[{number:1,amount:100000}]),loanId:id});
- for(const [action,target,fields] of [['loan_edit',id,{}],['loan_archive',id,{}],['loan_cancel_payment',pid,{loanId:id}]]){assert.equal((await post(action,target,fields)).r.status,400);assert.equal((await post(action,target,fields,'wrong')).r.status,403);}
+ for(const [action,target,fields] of [['loan_opening',randomUUID(),{loanId:id,date:'2026-10-27',platform:[],receipts:[{number:1,amount:10000}],note:''}],['loan_edit',id,{}],['loan_archive',id,{}],['loan_cancel_payment',pid,{loanId:id}]]){assert.equal((await post(action,target,fields)).r.status,400);assert.equal((await post(action,target,fields,'wrong')).r.status,403);}
+ const historical=await post('loan_opening',randomUUID(),{loanId:id,date:'2026-10-27',platform:[],receipts:[{number:1,amount:60000}],note:''},'editor-password-123');assert.equal(historical.r.status,200);assert.equal(personDebt(historical.r.data,id).received,60000);assert.deepEqual((await f.call('/finance',historical.req,a.sessionToken)).data,historical.r.data);
  const edit=await post('loan_edit',id,{...fields,title:'Corrected'},'editor-password-123');assert.equal(edit.r.status,200);assert.equal(JSON.stringify(edit.r.data).includes('editor-password-123'),false);
  assert.deepEqual((await f.call('/finance',edit.req,a.sessionToken)).data,edit.r.data);
  assert.equal((await post('loan_cancel_payment',pid,{loanId:id},'editor-password-123')).r.status,200);
  const archived=await post('loan_archive',id,{},'editor-password-123');assert.equal(archived.r.status,200);assert.equal(accountBalance(archived.r.data,'mandiri').current,200000);
+});
+
+test('opening installments distinguish platform settlement from receipts without changing cash',()=>{
+ const old={...fields,date:'2026-07-01',firstDue:'2026-08-01',opening:{date:'2026-10-01',platform:[1,2],receipts:[{number:1,amount:100000}],note:'Agustus diterima; September ditalangi'}};
+ let b=loanAction({revision:0,opening,entries:[]},'loan_create','old-loan',old,'alice',now);
+ assert.equal(b.revision,1);assert.equal(loanSummary(b.loans[0]).platform,300000);
+ assert.equal(personDebt(b,'old-loan').remaining,400000);assert.equal(personDebt(b,'old-loan').historical,100000);
+ assert.equal(b.entries.length,0);assert.equal(accountBalance(b,'mandiri').current,269175);
+ assert.equal(installments(b.loans[0])[1].platformRemaining,0);assert.equal(installments(b.loans[0])[1].borrowerRemaining,100000);
+ b=loanAction(b,'loan_opening','extra',{loanId:'old-loan',date:'2026-10-02',platform:[],receipts:[{number:2,amount:60000}],note:''},'alice',now);
+ assert.equal(personDebt(b,'old-loan').remaining,340000);assert.equal(loanSummary(b.loans[0]).platform,300000);
+ const snapshot=structuredClone(b);
+ for(const patch of [{platform:[2],receipts:[]},{platform:[],receipts:[{number:2,amount:40001}]},{platform:[3],receipts:[{number:1,amount:1}]},{platform:[],receipts:[{number:2,amount:-1}]},{platform:[],receipts:[{number:2,amount:1},{number:2,amount:1}]}]){
+  assert.throws(()=>loanAction(b,'loan_opening','invalid',{loanId:'old-loan',date:'2026-10-02',note:'',...patch},'alice',now));assert.deepEqual(b,snapshot);
+ }
+ assert.throws(()=>loanAction(b,'loan_opening','extra',{loanId:'old-loan',date:'2026-10-02',platform:[],receipts:[{number:2,amount:1}],note:''},'alice',now));
+ b=loanAction(b,'loan_cancel_payment','extra-borrower',{loanId:'old-loan'},'alice',now);
+ assert.equal(personDebt(b,'old-loan').remaining,400000);assert.equal(accountBalance(b,'mandiri').current,269175);
+ assert.equal(loanSummary(b.loans[0]).platform,300000);
+});
+test('opening receipts cannot be assigned to self or lost by editing an unpaid platform installment',()=>{
+ assert.throws(()=>loanAction({revision:0,entries:[]},'loan_create','self',{...fields,ownerId:'self',opening:{date:'2026-10-01',platform:[],receipts:[{number:1,amount:1}],note:''}},'alice',now));
+ let b=base();b=loanAction(b,'loan_opening','old',{loanId:'loan',date:'2026-10-01',platform:[],receipts:[{number:5,amount:60000}],note:''},'alice',now);
+ assert.throws(()=>loanAction(b,'loan_edit','loan',{...fields,tenor:4},'alice',now));
+ b=loanAction(b,'loan_edit','loan',{...fields,monthly:20000},'alice',now);
+ assert.equal(installments(b.loans[0])[4].amount,100000);assert.equal(personDebt(b,'loan').remaining,120000);
 });
