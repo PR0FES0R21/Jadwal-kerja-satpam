@@ -306,3 +306,10 @@ h1{font-size:26px;letter-spacing:-.8px;font-weight:700}h2{font-size:19px;font-we
 .opening-payment-row small{display:block;font-size:11px;color:var(--muted-text);margin-top:3px}
 .opening-payment-row label{font-size:12px}
 .opening-payment-row .loan-checkbox{display:flex;flex-direction:row;align-items:center;min-height:44px}
+
+.loan-voided-notice{padding:14px;margin:12px 0;border-radius:14px;background:var(--surface-soft);border:1px solid var(--border);font-size:13px}
+.loan-voided-notice p{margin:6px 0;overflow-wrap:anywhere}
+.loan-voided-notice small{color:var(--muted-text);font-size:12px}
+.loan-overview .analytics-summary{display:flex;flex-wrap:wrap;margin-top:12px}
+.loan-overview .loan-stat{flex:1 1 140px;min-width:min-content;padding:8px 0}
+.loan-overview .loan-stat strong{white-space:nowrap;overflow-wrap:normal}

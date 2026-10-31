@@ -112,15 +112,15 @@ return async function handleRequest(req){
       const current=await database.collection('finance').findOne({_id:auth.userId}),book=current?.data??{revision:0,entries:[]},q=new URL(req.url).searchParams;
       try{const filter={from:q.get('from')||today(),to:q.get('to')||today(),account:q.get('account')||'all',category:q.get('category')||'all'},r=financeAnalytics(book,filter,q.get('preset')||'custom',today());
       const strip=g=>{const {entries,...rest}=g;return {...rest,count:entries.length};};const {entries,creditPurchases,...rest}=r;
-      return send(200,{report:{...rest,people:debtPeople(book).map(p=>{const d=personDebt(book,p.id);return {name:p.name,total:d.total,received:d.received,remaining:d.remaining};}),count:entries.length,sources:r.sources.map(strip),spending:r.spending.map(strip),months:r.months.map(strip),creditCount:creditPurchases.length},data:financeView(book,new URLSearchParams()).data});}catch(e){fail(400,e.message);}
+      return send(200,{report:{...rest,people:debtPeople(book).map(p=>{const d=personDebt(book,p.id);return {name:p.name,total:d.total,received:d.received,remaining:d.remaining,credit:d.credit};}).filter(p=>p.total>0),count:entries.length,sources:r.sources.map(strip),spending:r.spending.map(strip),months:r.months.map(strip),creditCount:creditPurchases.length},data:financeView(book,new URLSearchParams()).data});}catch(e){fail(400,e.message);}
     }
     if(path==='/finance/view'&&method==='GET'){const current=await database.collection('finance').findOne({_id:auth.userId});try{return send(200,financeView(current?.data??{revision:0,entries:[]},new URL(req.url).searchParams));}catch(e){fail(400,e.message);}}
     if(path==='/finance'&&(method==='GET'||method==='POST')){
       const ledger=database.collection('finance');
       if(method==='GET'){const current=await ledger.findOne({_id:auth.userId});return send(200,{data:current?.data??{revision:0,entries:[]}});}
       const input=await body(req);
-      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_opening','loan_pay','loan_cancel_payment','loan_edit','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_pay_opening','pl_cancel_payment'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields','password'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
-      if((input.action==='loan_pay'&&input.fields?.side==='borrower')||['loan_opening','loan_edit','loan_archive','loan_cancel_payment','pl_edit_account','pl_edit_purchase','pl_cancel_purchase','pl_cancel_payment'].includes(input.action)){
+      if(!input||!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0||typeof input.operationId!=='string'||! /^[a-zA-Z0-9-]{16,80}$/.test(input.operationId)||!['create','edit','cancel','opening','account','archive','transfer','cancel_transfer','move_account','loan_create','loan_opening','loan_pay','loan_cancel_payment','loan_edit','loan_void','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_pay_opening','pl_cancel_payment'].includes(input.action)||typeof input.id!=='string'||! /^(?:[a-zA-Z0-9-]{16,80}|duty:[a-zA-Z0-9-]{1,80})$/.test(input.id)||Object.keys(input).some(k=>!['expectedRevision','operationId','action','id','fields','password'].includes(k)))fail(400,'Permintaan transaksi tidak valid.');
+      if((input.action==='loan_pay'&&input.fields?.side==='borrower')||['loan_opening','loan_edit','loan_void','loan_archive','loan_cancel_payment','pl_edit_account','pl_edit_purchase','pl_cancel_purchase','pl_cancel_payment'].includes(input.action)){
         if(typeof input.password!=='string'||!input.password||input.password.length>256)fail(400,'Masukkan password aplikasi.');
         const attempt=await limitLogin(req,database,auth.username+':loan-change');
         const user=await database.collection('users').findOne({_id:auth.userId});
@@ -128,7 +128,7 @@ return async function handleRequest(req){
         await database.collection('login_attempts').deleteOne({_id:attempt});
       }
       delete input.password;
-      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_opening','loan_pay','loan_cancel_payment','loan_edit','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_pay_opening','pl_cancel_payment'].includes(input.action);
+      const wallet=['account','archive','transfer','cancel_transfer','move_account','loan_create','loan_opening','loan_pay','loan_cancel_payment','loan_edit','loan_void','loan_archive','pl_account','pl_edit_account','pl_purchase','pl_edit_purchase','pl_cancel_purchase','pl_pay','pl_pay_opening','pl_cancel_payment'].includes(input.action);
       let fields;if(!wallet&&input.action!=='cancel'){try{fields=input.action==='opening'?openingFields(input.fields):financeFields(input.fields);}catch(e){fail(400,e.message);}}
       const transaction=client.startSession();let result;
       try{await transaction.withTransaction(async()=>{
