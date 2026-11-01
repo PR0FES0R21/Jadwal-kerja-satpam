@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {loanAction,installments,loanSummary,dueDate} from '../../lib/loans.ts';
+import {loanAction,installments,loanSummary,dueDate,monthlyLoanBills} from '../../lib/loans.ts';
 import {personDebt,debtPeople,receiptFields} from '../../lib/debt.ts';
 import {accountBalance,walletAction} from '../../lib/finance.ts';
 import {fixture} from './fixture.mjs';
@@ -117,4 +117,18 @@ test('opening receipts cannot be assigned to self or lost by editing an unpaid p
  assert.throws(()=>loanAction(b,'loan_edit','loan',{...fields,tenor:4},'alice',now));
  b=loanAction(b,'loan_edit','loan',{...fields,monthly:20000},'alice',now);
  assert.equal(installments(b.loans[0])[4].amount,100000);assert.equal(personDebt(b,'loan').remaining,120000);
+});
+
+test('monthly bill list combines people and platforms, sorts by due date and keeps platform payments separate',()=>{
+ let b=base();
+ b=loanAction(b,'loan_create','later',{...fields,title:'Cicilan Rani',borrower:'Rani',platform:'Kredivo',monthly:40000,tenor:2,firstDue:'2026-11-05',dueDay:5},'alice',now);
+ b=loanAction(b,'loan_pay','partial',payment('platform','mandiri',[{number:1,amount:25000}],{loanId:'loan'}),'alice',now);
+ const bills=monthlyLoanBills(b.loans,'2026-11');
+ assert.deepEqual(bills.map(x=>[x.due,x.loan.borrower,x.platformPaid,x.platformRemaining]),[['2026-11-01','Galang',25000,75000],['2026-11-05','Rani',0,40000]]);
+ assert.equal(bills.reduce((sum,x)=>sum+x.amount,0),140000);
+ assert.equal(bills.reduce((sum,x)=>sum+x.platformRemaining,0),115000);
+ assert.deepEqual(monthlyLoanBills(b.loans,'2026-10'),[]);
+ assert.deepEqual(monthlyLoanBills(b.loans,'invalid'),[]);
+ const voided={...b.loans[0],archived:true};assert.equal(monthlyLoanBills([voided],'2026-11').length,0);
+ assert.equal(personDebt(b,'loan').remaining,500000);
 });

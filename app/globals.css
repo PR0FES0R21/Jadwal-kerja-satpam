@@ -313,3 +313,23 @@ h1{font-size:26px;letter-spacing:-.8px;font-weight:700}h2{font-size:19px;font-we
 .loan-overview .analytics-summary{display:flex;flex-wrap:wrap;margin-top:12px}
 .loan-overview .loan-stat{flex:1 1 140px;min-width:min-content;padding:8px 0}
 .loan-overview .loan-stat strong{white-space:nowrap;overflow-wrap:normal}
+.loan-monthly{padding:16px;border-radius:20px;margin:12px 0 20px}
+.loan-month-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.loan-month-heading h2{font-size:17px}
+.loan-month-heading small{display:block;color:var(--muted-text);font-size:11px;margin-top:3px}
+.loan-month-heading label{width:min(155px,42%);font-size:11px;color:var(--muted-text)}
+.loan-month-heading input{margin-top:4px;min-height:42px;padding:7px 9px;font-size:13px}
+.loan-month-note{margin:12px 0!important;padding:10px 12px;border-radius:12px;background:var(--surface-soft);font-size:11px!important;line-height:1.55!important;color:var(--muted-text)}
+.loan-month-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0 0 8px}
+.loan-month-stats .loan-stat{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}
+.loan-month-stats .loan-stat small{font-size:10px;color:var(--muted-text);line-height:1.4}
+.loan-month-stats .loan-stat strong{display:block;margin-top:4px;font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.loan-month-list{display:grid;gap:8px;margin-top:10px}
+.loan-month-row{display:grid;grid-template-columns:76px minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:15px;background:var(--surface)}
+.loan-month-date strong,.loan-month-description strong,.loan-month-values strong{display:block;font-size:12px;line-height:1.4}
+.loan-month-date small,.loan-month-description small,.loan-month-values small{display:block;margin-top:3px;color:var(--muted-text);font-size:10px;line-height:1.4}
+.loan-month-description{min-width:0;overflow-wrap:anywhere}
+.loan-month-values{text-align:right;white-space:nowrap}
+.loan-month-row>.secondary{min-height:40px;padding:7px 10px;font-size:11px;border-radius:12px;white-space:nowrap}
+.loan-month-empty{padding:18px 8px}
+@media(max-width:560px){.loan-month-row{grid-template-columns:62px minmax(0,1fr);gap:8px 10px;padding:11px}.loan-month-date{grid-row:1 / span 3}.loan-month-values{grid-column:2;text-align:left;display:flex;align-items:baseline;gap:8px;white-space:normal}.loan-month-values small{margin-top:0}.loan-month-row>.secondary{grid-column:2;width:100%}}
