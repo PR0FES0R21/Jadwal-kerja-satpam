@@ -1,4 +1,4 @@
-# Jaga — Kalender Kerja
+# Jaga — Kalender Kerja.
 
 Aplikasi kalender shift, tukar jaga dua arah dengan perhitungan FIFO, lembur, dan long shift. Setiap pengguna mendaftar memakai username/password sendiri. Akun, sesi, jadwal, dan riwayat versi tersimpan di MongoDB. Tampilan aplikasi dapat di-host sepenuhnya di Netlify.
 
