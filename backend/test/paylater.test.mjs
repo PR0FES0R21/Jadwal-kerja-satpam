@@ -85,3 +85,59 @@ test('opening import and payment API preserve idempotency, password guards, owne
  assert.equal((await post('pl_cancel_payment',r.req.id,{},'credit-password-123')).r.status,200);
  assert.equal(balance((await f.call('/finance',undefined,a.sessionToken)).data,aid).available,800000);
 });
+
+test('facility settlement pays all unpaid installments once across purchases and cancellation reverses the batch',()=>{
+ for(const restore of ['installment','full']){
+  let b=base(restore);b={...b,opening:{...b.opening,amount:2000000}};
+  b=act(b,'pl_purchase','purchase',{...purchase,facilityId:'facility'},'qa',now);
+  b=act(b,'pl_purchase','second',{...purchase,description:'Baju',principal:300000,monthly:110000},'qa',now);
+  b=act(b,'pl_account','other-facility',{name:'Lain',limit:1000000,restore},'qa',now);
+  b=act(b,'pl_purchase','other-purchase',{...purchase,facilityId:'other-facility',principal:300000,monthly:110000},'qa',now);
+  b=act(b,'pl_pay','already-paid',pay([1]),'qa',now);
+  const settled=act(b,'pl_pay_facility','facility-payment',{facilityId:'facility',accountId:'mandiri',date:'2026-10-30'},'qa',now);
+  const batch=settled.payLaterPayments.at(-1);
+  assert.equal(batch.amount,770000);assert.equal(batch.purchaseId,'');assert.equal(batch.facilityId,'facility');
+  assert.deepEqual(batch.allocations,[{purchaseId:'purchase',numbers:[2,3],amount:440000},{purchaseId:'second',numbers:[1,2,3],amount:330000}]);
+  assert.equal(settled.entries.filter(e=>e.sourcePayLaterPaymentId==='facility-payment').length,1);
+  assert.equal(accountBalance(settled,'mandiri').current,1010000);
+  assert.equal(balance(settled,'facility').available,2000000);
+  assert.equal(balance(settled,'other-facility').available,700000);
+  assert.equal(rows(settled,settled.payLaterPurchases.find(x=>x.id==='purchase')).every(r=>r.paid),true);
+  assert.equal(rows(settled,settled.payLaterPurchases.find(x=>x.id==='second')).every(r=>r.paid),true);
+  assert.equal(rows(settled,settled.payLaterPurchases.find(x=>x.id==='other-purchase')).every(r=>!r.paid),true);
+  assert.throws(()=>act(settled,'pl_edit_purchase','second',{...purchase,description:'Ubah'},'qa',now),/Batalkan pembayaran/);
+  assert.throws(()=>act(settled,'pl_cancel_purchase','second',{},'qa',now),/Batalkan pembayaran/);
+  const cancelled=act(settled,'pl_cancel_payment','facility-payment',{},'qa',now);
+  assert.equal(accountBalance(cancelled,'mandiri').current,1780000);
+  assert.equal(cancelled.entries.find(e=>e.sourcePayLaterPaymentId==='facility-payment').cancelled,true);
+  assert.equal(rows(cancelled,cancelled.payLaterPurchases.find(x=>x.id==='purchase')).filter(r=>r.paid).length,1);
+  assert.equal(rows(cancelled,cancelled.payLaterPurchases.find(x=>x.id==='second')).every(r=>!r.paid),true);
+  assert.equal(balance(cancelled,'facility').available,restore==='installment'?1300000:1100000);
+ }
+});
+
+test('facility settlement rejects no-open-installment and insufficient-balance cases without mutation',()=>{
+ let b=base();b=act(b,'pl_purchase','purchase',purchase,'qa',now);const copy=structuredClone(b);
+ assert.throws(()=>act(b,'pl_pay_facility','none',{facilityId:'missing',accountId:'mandiri',date:'2026-10-30'},'qa',now));assert.deepEqual(b,copy);
+ const poor={...b,opening:{...b.opening,amount:100000}};
+ assert.throws(()=>act(poor,'pl_pay_facility','too-much',{facilityId:'facility',accountId:'mandiri',date:'2026-10-30'},'qa',now),/Saldo rekening tidak cukup/);
+ assert.deepEqual(poor,{...b,opening:{...b.opening,amount:100000}});
+ let paid=act(b,'pl_pay','all',pay([1,2,3]),'qa',now);assert.throws(()=>act(paid,'pl_pay_facility','already-done',{facilityId:'facility',accountId:'mandiri',date:'2026-10-30'},'qa',now),/Tidak ada cicilan/);
+});
+
+test('facility settlement API is idempotent and cancellation stays password-protected',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'facilityuser',password:'credit-password-123'});let revision=0;
+ async function post(action,id,fields,password){const req={action,id,fields,password,expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};}
+ const aid=randomUUID(),p1=randomUUID(),p2=randomUUID(),paymentId=randomUUID();
+ assert.equal((await post('pl_account',aid,{name:'Contoh',limit:2000000,restore:'installment'})).r.status,200);
+ await post('opening',randomUUID(),{amount:2000000,date:'2026-10-01'});
+ assert.equal((await post('pl_purchase',p1,{...purchase,facilityId:aid})).r.status,200);
+ assert.equal((await post('pl_purchase',p2,{...purchase,facilityId:aid,description:'Baju',principal:300000,monthly:110000})).r.status,200);
+ const result=await post('pl_pay_facility',paymentId,{facilityId:aid,accountId:'mandiri',date:'2026-10-30'});
+ assert.equal(result.r.status,200);assert.equal(result.r.data.payLaterPayments.at(-1).amount,990000);
+ assert.deepEqual((await f.call('/finance',result.req,a.sessionToken)).data,result.r.data);
+ assert.equal((await post('pl_cancel_payment',paymentId,{})).r.status,400);
+ assert.equal((await post('pl_cancel_payment',paymentId,{},'wrong')).r.status,403);
+ assert.equal((await post('pl_cancel_payment',paymentId,{},'credit-password-123')).r.status,200);
+ const saved=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(accountBalance(saved,'mandiri').current,2000000);assert.equal(rows(saved,saved.payLaterPurchases.find(x=>x.id===p1)).every(r=>!r.paid),true);
+});

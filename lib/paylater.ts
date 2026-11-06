@@ -4,8 +4,10 @@ import {dueDate} from './loans.ts';
 import {accountBalance,requireAccount,categories,entryFields,type FinanceData,type FinanceEntry} from './finance.ts';
 export type PayLaterAccount={id:string;name:string;limit:number;openingUsed?:number;restore:'installment'|'full';createdAt:string;createdBy:string;history?:any[]};
 export type PayLaterPurchase={id:string;facilityId:string;transactionKind?:string;description:string;category:string;party:string;date:string;principal:number;monthly:number;tenor:number;firstDue:string;cancelled:boolean;createdAt:string;createdBy:string;history?:any[]};
-export type PayLaterPayment={id:string;purchaseId:string;openingFacilityId?:string;principal?:number;numbers:number[];amount:number;date:string;accountId:string;cancelled:boolean;createdAt:string;createdBy:string;cancelledAt?:string;cancelledBy?:string};
-export function payLaterRows(book:FinanceData,p:PayLaterPurchase){return Array.from({length:p.tenor},(_,i)=>{const number=i+1,principal=Math.floor(p.principal/p.tenor)+(i<p.principal%p.tenor?1:0),payment=book.payLaterPayments?.find(x=>!x.cancelled&&x.purchaseId===p.id&&x.numbers.includes(number));return {number,principal,amount:p.monthly,due:dueDate(p.firstDue,i),paid:!!payment};});}
+export type PayLaterAllocation={purchaseId:string;numbers:number[];amount:number};
+export type PayLaterPayment={id:string;purchaseId:string;facilityId?:string;allocations?:PayLaterAllocation[];openingFacilityId?:string;principal?:number;numbers:number[];amount:number;date:string;accountId:string;cancelled:boolean;createdAt:string;createdBy:string;cancelledAt?:string;cancelledBy?:string};
+const paymentCoversPurchase=(payment:PayLaterPayment,purchaseId:string)=>payment.purchaseId===purchaseId||!!payment.allocations?.some(a=>a.purchaseId===purchaseId);
+export function payLaterRows(book:FinanceData,p:PayLaterPurchase){return Array.from({length:p.tenor},(_,i)=>{const number=i+1,principal=Math.floor(p.principal/p.tenor)+(i<p.principal%p.tenor?1:0),paid=(book.payLaterPayments??[]).some(x=>!x.cancelled&&(x.purchaseId===p.id&&x.numbers.includes(number)||x.allocations?.some(a=>a.purchaseId===p.id&&a.numbers.includes(number))));return {number,principal,amount:p.monthly,due:dueDate(p.firstDue,i),paid};});}
 export function payLaterBalance(book:FinanceData,id:string){
  const a=book.payLaterAccounts?.find(x=>x.id===id);
  const openingPaid=(book.payLaterPayments??[]).filter(p=>!p.cancelled&&p.openingFacilityId===id).reduce((n,p)=>n+(p.principal??0),0);
@@ -41,7 +43,7 @@ export function payLaterAction(book:FinanceData,action:string,id:string,v:any,ac
  if(action==='pl_purchase'||action==='pl_edit_purchase'){
   obj(v,['facilityId','description','category','party','date','principal','monthly','tenor','firstDue','transactionKind']);
   const old=purchases.find(p=>p.id===id);if(action==='pl_purchase'&&(old||purchases.length>=1000))throw Error('Transaksi sudah ada atau batas 1.000 tercapai.');if(action==='pl_edit_purchase'&&(!old||old.cancelled))throw Error('Transaksi aktif tidak ditemukan.');
-  if(old&&payments.some(p=>p.purchaseId===id&&!p.cancelled))throw Error('Batalkan pembayaran terlebih dahulu sebelum mengedit transaksi.');
+  if(old&&payments.some(p=>!p.cancelled&&paymentCoversPurchase(p,id)))throw Error('Batalkan pembayaran terlebih dahulu sebelum mengedit transaksi.');
   if(!accounts.some(a=>a.id===v.facilityId)||old&&old.facilityId!==v.facilityId)throw Error('PayLater tidak valid.');const principal=amount(v.principal),monthly=amount(v.monthly);
   if(!Number.isInteger(v.tenor)||v.tenor<1||v.tenor>120||principal<v.tenor||monthly*v.tenor<principal)throw Error('Periksa tenor dan cicilan; total tagihan minimal sebesar pokok.');amount(monthly*v.tenor);
   if(!validDate(v.date)||v.date>today()||!validDate(v.firstDue)||v.firstDue<v.date||!validDate(dueDate(v.firstDue,v.tenor-1)))throw Error('Periksa tanggal transaksi dan jatuh tempo pertama.');
@@ -52,33 +54,37 @@ export function payLaterAction(book:FinanceData,action:string,id:string,v:any,ac
   return {...next,payLaterPurchases:[...purchases.filter(p=>p.id!==id),p]};
  }
  if(action==='pl_cancel_purchase'){
-  obj(v,[]);const p=purchases.find(p=>p.id===id&&!p.cancelled);if(!p)throw Error('Transaksi aktif tidak ditemukan.');if(payments.some(x=>x.purchaseId===id&&!x.cancelled))throw Error('Batalkan pembayaran terlebih dahulu.');
+  obj(v,[]);const p=purchases.find(p=>p.id===id&&!p.cancelled);if(!p)throw Error('Transaksi aktif tidak ditemukan.');if(payments.some(x=>!x.cancelled&&paymentCoversPurchase(x,id)))throw Error('Batalkan pembayaran terlebih dahulu.');
   return {...next,payLaterPurchases:purchases.map(x=>x.id===id?{...x,cancelled:true,history:[...(x.history??[]),{at:now,by:actor,action}]}:x)};
  }
  if(action==='pl_cancel_payment'){
   obj(v,[]);const p=payments.find(p=>p.id===id&&!p.cancelled);if(!p)throw Error('Pembayaran aktif tidak ditemukan.');
   return {...next,payLaterPayments:payments.map(x=>x.id===id?{...x,cancelled:true,cancelledAt:now,cancelledBy:actor}:x),entries:book.entries.map(e=>e.sourcePayLaterPaymentId===id?{...e,cancelled:true,updatedAt:now,updatedBy:actor,history:[...e.history,{at:now,by:actor,action:'cancel',before:entryFields(e)}]}:e)};
  }
- if(action!=='pl_pay'&&action!=='pl_pay_opening')throw Error('Tindakan PayLater tidak valid.');
- const opening=action==='pl_pay_opening';
- obj(v,opening?['facilityId','principal','fee','accountId','date']:['purchaseId','numbers','accountId','date']);
- const p=opening?undefined:purchases.find(p=>p.id===v.purchaseId&&!p.cancelled);
- const facility=accounts.find(a=>a.id===(opening?v.facilityId:p?.facilityId));
- if(!facility||!opening&&!p)throw Error('Transaksi atau PayLater aktif tidak ditemukan.');
+ if(action!=='pl_pay'&&action!=='pl_pay_opening'&&action!=='pl_pay_facility')throw Error('Tindakan PayLater tidak valid.');
+ const opening=action==='pl_pay_opening',facilityMode=action==='pl_pay_facility';
+ obj(v,opening?['facilityId','principal','fee','accountId','date']:facilityMode?['facilityId','accountId','date']:['purchaseId','numbers','accountId','date']);
+ const p=opening||facilityMode?undefined:purchases.find(p=>p.id===v.purchaseId&&!p.cancelled);
+ const facility=accounts.find(a=>a.id===(opening||facilityMode?v.facilityId:p?.facilityId));
+ if(!facility||!opening&&!facilityMode&&!p)throw Error('Transaksi atau PayLater aktif tidak ditemukan.');
  if(payments.some(x=>x.id===id)||book.entries.some(e=>e.id===id))throw Error('Pembayaran sudah tercatat.');
- let total:number,principal:number|undefined;
+ let total:number,principal:number|undefined,allocations:PayLaterAllocation[]|undefined;
  if(opening){
   principal=amount(v.principal);
   if(principal>payLaterBalance(book,facility.id).openingUsed)throw Error('Pembayaran pokok melebihi sisa pemakaian sebelumnya.');
   if(!Number.isSafeInteger(v.fee)||v.fee<0||v.fee>1e12)throw Error('Biaya harus rupiah bulat, minimal nol.');
   total=amount(principal+v.fee);
+ }else if(facilityMode){
+  allocations=purchases.filter(x=>x.facilityId===facility.id&&!x.cancelled).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id)).flatMap(x=>{const unpaid=payLaterRows(book,x).filter(r=>!r.paid);return unpaid.length?[{purchaseId:x.id,numbers:unpaid.map(r=>r.number),amount:amount(unpaid.reduce((n,r)=>n+r.amount,0))}]:[];});
+  if(!allocations.length)throw Error('Tidak ada cicilan yang belum lunas pada fasilitas ini.');
+  total=amount(allocations.reduce((n,a)=>n+a.amount,0));
  }else{
   if(!Array.isArray(v.numbers)||!v.numbers.length||v.numbers.length>p!.tenor||new Set(v.numbers).size!==v.numbers.length)throw Error('Pilih cicilan yang valid.');
   const rows=payLaterRows(book,p!);const picked=v.numbers.map((n:number)=>{const row=rows.find(r=>r.number===n);if(!row||row.paid)throw Error('Cicilan sudah dibayar atau tidak ditemukan.');return row;});total=amount(picked.reduce((n:number,r:any)=>n+r.amount,0));
  }
- if(!validDate(v.date)||v.date>today()||p&&v.date<p.date)throw Error('Tanggal pembayaran tidak valid.');
+ if(!validDate(v.date)||v.date>today()||p&&v.date<p.date||facilityMode&&allocations!.some(a=>v.date<purchases.find(x=>x.id===a.purchaseId)!.date))throw Error('Tanggal pembayaran tidak valid.');
  const account=requireAccount(book,v.accountId,v.date);if(!account.opening||v.date<account.opening.date)throw Error('Atur saldo awal sebelum tanggal pembayaran.');if((accountBalance(book,account.id).current??0)<total)throw Error('Saldo rekening tidak cukup.');if(book.entries.length>=5000||payments.length>=5000)throw Error('Batas transaksi tercapai.');
- const payment:PayLaterPayment={id,purchaseId:p?.id??'',...(opening?{openingFacilityId:facility.id,principal}:{}),numbers:opening?[]:v.numbers,amount:total,date:v.date,accountId:account.id,cancelled:false,...audit};
- const entry:FinanceEntry={id,sourcePayLaterPaymentId:id,type:'expense',category:'Cicilan',description:`PayLater · ${p?.description??'Pemakaian sebelumnya'}`,party:facility.name,method:'Pelunasan PayLater',amount:total,date:v.date,accountId:account.id,cancelled:false,...audit,updatedAt:now,updatedBy:actor,history:[{at:now,by:actor,action:'create',before:null}]};
+ const payment:PayLaterPayment={id,purchaseId:p?.id??'',...(facilityMode?{facilityId:facility.id,allocations}:!opening?{facilityId:facility.id}:{}),...(opening?{openingFacilityId:facility.id,principal}:{}),numbers:opening||facilityMode?[]:v.numbers,amount:total,date:v.date,accountId:account.id,cancelled:false,...audit};
+ const entry:FinanceEntry={id,sourcePayLaterPaymentId:id,type:'expense',category:'Cicilan',description:`PayLater · ${p?.description??(facilityMode?`Semua cicilan ${facility.name}`:'Pemakaian sebelumnya')}`,party:facility.name,method:'Pelunasan PayLater',amount:total,date:v.date,accountId:account.id,cancelled:false,...audit,updatedAt:now,updatedBy:actor,history:[{at:now,by:actor,action:'create',before:null}]};
  return {...next,payLaterPayments:[...payments,payment],entries:[...book.entries,entry]};
 }
