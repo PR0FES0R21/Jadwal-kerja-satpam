@@ -14,7 +14,8 @@ async function proxy(request:Request,context:{params:Promise<{path:string[]}>}){
   try{
     const body=request.method==='GET'?undefined:await request.text();
     if(body&&new TextEncoder().encode(body).length>8*1024*1024)return Response.json({error:'Data terlalu besar.'},{status:413});
-    const result=await fetch(new URL('/'+path,backend),{method:request.method,headers,body,signal:AbortSignal.timeout(65000)});
+    const target=new URL('/'+path,backend);target.search=new URL(request.url).search;
+    const result=await fetch(target,{method:request.method,headers,body,signal:AbortSignal.timeout(65000)});
     const payload=await result.json() as Record<string,unknown>;
     const token=payload.sessionToken;delete payload.sessionToken;
     const outgoing=new Headers({'cache-control':'no-store'});

@@ -7,6 +7,9 @@ export type PayLaterPurchase={id:string;facilityId:string;transactionKind?:strin
 export type PayLaterAllocation={purchaseId:string;numbers:number[];amount:number};
 export type PayLaterPayment={id:string;purchaseId:string;facilityId?:string;allocations?:PayLaterAllocation[];openingFacilityId?:string;principal?:number;numbers:number[];amount:number;date:string;accountId:string;cancelled:boolean;createdAt:string;createdBy:string;cancelledAt?:string;cancelledBy?:string};
 const paymentCoversPurchase=(payment:PayLaterPayment,purchaseId:string)=>payment.purchaseId===purchaseId||!!payment.allocations?.some(a=>a.purchaseId===purchaseId);
+export function payLaterFacilityBills(book:FinanceData,facilityId:string){
+ return (book.payLaterPurchases??[]).filter(p=>p.facilityId===facilityId&&!p.cancelled).flatMap(p=>payLaterRows(book,p).filter(row=>!row.paid).map(row=>({purchase:p,row}))).sort((a,b)=>a.row.due.localeCompare(b.row.due)||a.purchase.id.localeCompare(b.purchase.id)||a.row.number-b.row.number);
+}
 export function payLaterRows(book:FinanceData,p:PayLaterPurchase){return Array.from({length:p.tenor},(_,i)=>{const number=i+1,principal=Math.floor(p.principal/p.tenor)+(i<p.principal%p.tenor?1:0),paid=(book.payLaterPayments??[]).some(x=>!x.cancelled&&(x.purchaseId===p.id&&x.numbers.includes(number)||x.allocations?.some(a=>a.purchaseId===p.id&&a.numbers.includes(number))));return {number,principal,amount:p.monthly,due:dueDate(p.firstDue,i),paid};});}
 export function payLaterBalance(book:FinanceData,id:string){
  const a=book.payLaterAccounts?.find(x=>x.id===id);
@@ -75,7 +78,8 @@ export function payLaterAction(book:FinanceData,action:string,id:string,v:any,ac
   if(!Number.isSafeInteger(v.fee)||v.fee<0||v.fee>1e12)throw Error('Biaya harus rupiah bulat, minimal nol.');
   total=amount(principal+v.fee);
  }else if(facilityMode){
-  allocations=purchases.filter(x=>x.facilityId===facility.id&&!x.cancelled).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id)).flatMap(x=>{const unpaid=payLaterRows(book,x).filter(r=>!r.paid);return unpaid.length?[{purchaseId:x.id,numbers:unpaid.map(r=>r.number),amount:amount(unpaid.reduce((n,r)=>n+r.amount,0))}]:[];});
+  const bills=payLaterFacilityBills(book,facility.id);
+  allocations=[...new Set(bills.map(b=>b.purchase.id))].sort((a,b)=>{const x=purchases.find(p=>p.id===a)!,y=purchases.find(p=>p.id===b)!;return x.date.localeCompare(y.date)||a.localeCompare(b);}).map(purchaseId=>{const rows=bills.filter(b=>b.purchase.id===purchaseId).map(b=>b.row);return {purchaseId,numbers:rows.map(r=>r.number),amount:amount(rows.reduce((n,r)=>n+r.amount,0))};});
   if(!allocations.length)throw Error('Tidak ada cicilan yang belum lunas pada fasilitas ini.');
   total=amount(allocations.reduce((n,a)=>n+a.amount,0));
  }else{

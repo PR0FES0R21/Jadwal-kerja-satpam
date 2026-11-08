@@ -481,3 +481,29 @@ h1{font-size:26px;letter-spacing:-.8px;font-weight:700}h2{font-size:19px;font-we
 }
 
 .daily-spending-section>.section-heading>div{display:grid;gap:3px}.daily-spending-section>.section-heading>div>small{color:var(--muted-text);font-size:11px}.daily-spending-section>.section-heading>strong{font-size:14px;text-align:right}.daily-chart-legend{display:flex;flex-wrap:wrap;gap:14px;margin:14px 0 4px;color:var(--muted-text);font-size:11px}.daily-chart-legend>span{display:inline-flex;align-items:center;gap:6px}.daily-chart-legend i{display:inline-block;width:9px;height:9px;border-radius:3px}.daily-key-cash{background:#d08446}.daily-key-credit{background:#5278c7}.daily-chart-scroll{overflow-x:auto;overscroll-behavior-x:contain;margin:8px -4px 0;padding:8px 4px 10px;scrollbar-width:thin}.daily-chart-track{display:flex;align-items:stretch;gap:3px;width:max-content;min-width:100%;height:178px}.daily-chart-column{flex:0 0 54px;display:grid;grid-template-rows:18px 132px 20px;justify-items:center;align-items:end;gap:3px;border:0;border-radius:8px;padding:2px 1px;background:transparent;color:var(--foreground);cursor:pointer}.daily-chart-column:hover,.daily-chart-column.selected{background:var(--primary-soft)}.daily-chart-column.selected{box-shadow:inset 0 0 0 1px var(--primary)}.daily-chart-total{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:clip;color:var(--muted-text);font-size:9px;line-height:15px;font-variant-numeric:tabular-nums}.daily-bar-stack{align-self:end;display:flex;flex-direction:column-reverse;justify-content:flex-start;width:22px;height:132px;overflow:hidden;border-bottom:1px solid var(--border);border-radius:4px 4px 0 0}.daily-bar-part{display:block;flex:0 0 auto;width:100%;min-height:0}.daily-bar-cash{background:#d08446}.daily-bar-credit{background:#5278c7}.daily-chart-date{font-size:10px;line-height:16px;white-space:nowrap;color:var(--muted-text)}.daily-chart-note{font-size:11px;line-height:1.6;margin:10px 0 0}.daily-chart-column:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(max-width:540px){.daily-chart-track{gap:2px}.daily-chart-column{flex-basis:50px}.daily-spending-section>.section-heading>strong{font-size:13px}.daily-chart-scroll{margin-left:-8px;margin-right:-8px;padding-left:8px;padding-right:8px}}
+
+/* Debt summaries and transaction review */
+.loan-month-stats{display:flex;flex-wrap:wrap;margin:16px 0 8px;gap:8px}
+.loan-month-stats .loan-stat{flex:1 1 90px;padding:12px 10px}
+.loan-month-stats .loan-stat strong{font-size:16px;white-space:nowrap;overflow-wrap:normal}
+.loan-person-overview{padding:16px;margin:0 0 20px;border-radius:18px}
+.loan-person-overview summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-size:13px}
+.loan-person-overview summary span{min-width:0}.loan-person-overview summary small{display:block;font-size:11px;color:var(--muted-text);margin-top:3px}
+.loan-person-overview summary strong{white-space:nowrap}.loan-person-overview>small{display:block;color:var(--muted-text);font-size:11px;margin-top:12px}
+.loan-person-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:12px 0;border-bottom:1px solid var(--border)}
+.loan-person-row span{min-width:0;overflow-wrap:anywhere}.loan-person-row strong{white-space:nowrap}
+.pl-cancel-preview{padding:14px;border:1px solid var(--border);background:var(--surface-soft);border-radius:14px;min-width:0}
+.pl-cancel-preview>small{color:var(--muted-text);font-size:12px}.pl-refund{display:block;font-size:25px;margin:5px 0;letter-spacing:-.5px}.pl-cancel-preview p{font-size:13px}
+.pl-bulk-breakdown>div>span{min-width:0;overflow-wrap:anywhere}.pl-bulk-breakdown>div>strong{white-space:nowrap;flex-shrink:0}
+.pl-payment-total{padding:12px 14px;border-radius:12px;background:var(--surface-soft);font-size:12px}
+.pl-payment-total>span{display:flex;justify-content:space-between;gap:12px}.pl-payment-total strong{font-size:15px;white-space:nowrap}.pl-payment-total>small{display:block;margin-top:6px;color:var(--expense)}
+.analytics-detail-tabs{display:flex;gap:8px}.analytics-detail-tabs button{flex:1;font-size:12px;padding:8px}
+.analytics-detail-tabs [aria-pressed=true]{background:var(--primary-soft);border-color:var(--primary);color:var(--primary)}
+.analytics-detail-total{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;color:var(--muted-text)}.analytics-detail-total strong{color:var(--foreground);white-space:nowrap}
+.analytics-detail-row{border-bottom:1px solid var(--border);padding:16px 0;min-width:0}
+.analytics-detail-row summary{display:flex;justify-content:space-between;align-items:center;gap:12px;list-style:none;cursor:pointer;font-size:13px}
+.analytics-detail-row summary::-webkit-details-marker{display:none}.analytics-detail-row summary>span{flex:1;min-width:0}.analytics-detail-row b{display:block;overflow-wrap:anywhere}.analytics-detail-row summary>strong{flex-shrink:0;white-space:nowrap;text-align:right;font-size:12px}
+.analytics-detail-row small{display:block;font-size:11px;color:var(--muted-text);margin-top:5px}.analytics-detail-row>div{padding:12px 0 0;font-size:12px}.analytics-detail-row .text-button{margin-top:10px}
+
+.loan-month-heading label{width:150px;flex:0 0 150px}.loan-month-heading>div{min-width:0}
+@media(max-width:360px){.loan-month-heading{align-items:stretch;flex-direction:column;gap:10px}.loan-month-heading label{width:100%;flex:auto}}

@@ -67,3 +67,17 @@ test('finance report API returns daily buckets for the chart',async()=>{
  assert.deepEqual(response.report.daily,[{date,cash:10,credit:20,repayment:0,total:30}]);
  assert.equal(response.report.dailyTotal,30);
 });
+
+test('daily drilldowns match chart totals across filters and pages while repayments and transfer fees stay distinct',async()=>{
+ const {financeView}=await import('../../lib/finance-view.ts');
+ const date='2026-10-26',f={from:date,to:date,account:'all',category:'all'};
+ const book={revision:0,entries:[...Array.from({length:12},(_,i)=>row('cash-'+i,'expense',100,'Belanja',date)),row('fee','expense',25,'Lainnya',date,{transferFeeFor:'t'}),row('transfer','expense',9999,'Lainnya',date,{transferId:'t'}),row('repay','expense',300,'Cicilan',date,{sourcePayLaterPaymentId:'payment'}),row('cancelled','expense',9000,'Belanja',date,{cancelled:true})],payLaterPurchases:[{id:'pl',facilityId:'facility',date,principal:500,category:'Belanja',createdAt:date+'T12:00:00Z',cancelled:false}]};
+ for(const patch of [{},{category:'Belanja'},{account:'mandiri'},{account:'paylater:facility'},{category:'Cicilan'}]){
+  const filter={...f,...patch},report=financeAnalytics(book,filter,'today',date),q=new URLSearchParams({...filter,scope:'spending'}),first=financeView(book,q);
+  assert.equal(first.expense+first.credit,report.dailyTotal);
+  const all=[];for(let page=1;page<=first.pages;page++){q.set('page',String(page));all.push(...financeView(book,q).entries);}
+  assert.equal(all.reduce((n,e)=>n+e.amount,0),report.dailyTotal);assert.equal(all.some(e=>e.transferId||e.sourcePayLaterPaymentId||e.cancelled),false);
+  q.set('scope','repayments');q.set('page','1');const repayments=financeView(book,q);assert.equal(repayments.expense,report.daily[0].repayment);assert.equal(repayments.credit,0);
+ }
+ assert.throws(()=>financeView(book,new URLSearchParams({...f,scope:'invalid'})));
+});

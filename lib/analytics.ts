@@ -1,5 +1,6 @@
 import {validDate} from './jaga.ts';
 import type {FinanceData,FinanceEntry} from './finance.ts';
+import {inFinanceScope,matchesFinanceFilter} from './finance-filter.ts';
 export type AnalyticsFilter={from:string;to:string;account:string;category:string};
 export type Preset='today'|'week'|'month'|'last7'|'last30'|'last90'|'lastMonth'|'quarter'|'sixMonths'|'year'|'custom';
 type DailySpending={date:string;cash:number;credit:number;repayment:number;total:number};
@@ -24,14 +25,14 @@ export function previousRange(f:AnalyticsFilter,p:Preset){
 }
 export function financeAnalytics(book:FinanceData,f:AnalyticsFilter,p:Preset,now:string){
  validateRange(f,now);
- const eligible=book.entries.filter(e=>!e.cancelled&&!e.transferId&&(f.account==='all'||(e.accountId??'mandiri')===f.account)&&(f.category==='all'||e.category===f.category));
+ const eligible=book.entries.filter(e=>inFinanceScope(e,'cash')&&matchesFinanceFilter(e,f));
  const between=(from:string,to:string)=>eligible.filter(e=>e.date>=from&&e.date<=to).sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));
  const entries=between(f.from,f.to),prior=previousRange(f,p),previous=between(prior.from,prior.to);
  const total=(rows:FinanceEntry[],type:string)=>rows.filter(e=>e.type===type).reduce((n,e)=>n+e.amount,0);
  const income=total(entries,'income'),expense=total(entries,'expense'),previousExpense=total(previous,'expense');
  const groups=(type:'income'|'expense')=>[...new Set(entries.filter(e=>e.type===type).map(e=>e.category))].map(name=>{const rows=entries.filter(e=>e.type===type&&e.category===name);return {name,total:rows.reduce((n,e)=>n+e.amount,0),entries:rows};}).sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name));
  const months:{month:string;income:number;expense:number;entries:FinanceEntry[]}[]=[];for(let m=monthStart(f.from);m<=f.to;m=monthStart(m,1)){const rows=entries.filter(e=>e.date.slice(0,7)===m.slice(0,7));months.push({month:m.slice(0,7),income:total(rows,'income'),expense:total(rows,'expense'),entries:rows});}
- const creditPurchases=(book.payLaterPurchases??[]).filter(x=>!x.cancelled&&x.date>=f.from&&x.date<=f.to&&f.account==='all'&&(f.category==='all'||x.category===f.category));
+ const creditPurchases=(book.payLaterPurchases??[]).filter(x=>!x.cancelled&&x.date>=f.from&&x.date<=f.to&&matchesFinanceFilter({accountId:'paylater:'+x.facilityId,category:x.category},f));
  const creditSpending=[...new Set(creditPurchases.map(x=>x.category))].map(category=>({category,total:creditPurchases.filter(x=>x.category===category).reduce((n,x)=>n+x.principal,0)}));
  const byDate=new Map<string,DailySpending>();
  for(let d=f.from;d<=f.to;d=shift(d,1))byDate.set(d,{date:d,cash:0,credit:0,repayment:0,total:0});

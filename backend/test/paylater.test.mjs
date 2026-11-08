@@ -141,3 +141,22 @@ test('facility settlement API is idempotent and cancellation stays password-prot
  assert.equal((await post('pl_cancel_payment',paymentId,{},'credit-password-123')).r.status,200);
  const saved=(await f.call('/finance',undefined,a.sessionToken)).data;assert.equal(accountBalance(saved,'mandiri').current,2000000);assert.equal(rows(saved,saved.payLaterPurchases.find(x=>x.id===p1)).every(r=>!r.paid),true);
 });
+
+test('facility payments reject stale writes, foreign ids and forged totals and roll back fully on persistence failure',async()=>{
+ const f=fixture(),a=await f.call('/auth/register',{username:'batchguard',password:'credit-password-123'}),other=await f.call('/auth/register',{username:'batchother',password:'credit-password-123'});let revision=0;
+ const post=async(action,id,fields,password)=>{const req={action,id,fields,password,expectedRevision:revision,operationId:randomUUID()},r=await f.call('/finance',req,a.sessionToken);if(r.status===200)revision=r.data.revision;return {r,req};};
+ const aid=randomUUID(),pid=randomUUID();await post('pl_account',aid,{name:'Contoh',limit:2000000,restore:'installment'});await post('opening',randomUUID(),{amount:2000000,date:'2026-10-01'});await post('pl_purchase',pid,{...purchase,facilityId:aid});
+ const fields={facilityId:aid,accountId:'mandiri',date:'2026-10-30'};
+ const initial=(await f.call('/finance',undefined,a.sessionToken)).data;
+ assert.equal((await post('pl_pay_facility',randomUUID(),{...fields,amount:1})).r.status,400);
+ const foreign={action:'pl_pay_facility',id:randomUUID(),fields,expectedRevision:0,operationId:randomUUID()};assert.equal((await f.call('/finance',foreign,other.sessionToken)).status,400);
+ const collection=f.database.collection;let failOnce=true;
+ f.database.collection=name=>{const c=collection(name);if(name==='operations'){const insert=c.insertOne;c.insertOne=async value=>{if(failOnce){failOnce=false;throw Error('Simulated persistence failure');}return insert.call(c,value);};}return c;};
+ const failed=await post('pl_pay_facility',randomUUID(),fields);assert.equal(failed.r.status,503);assert.deepEqual((await f.call('/finance',undefined,a.sessionToken)).data,initial);
+ f.database.collection=collection;
+ const requests=[1,2].map(()=>({action:'pl_pay_facility',id:randomUUID(),fields,expectedRevision:revision,operationId:randomUUID()}));
+ const outcomes=await Promise.all(requests.map(req=>f.call('/finance',req,a.sessionToken)));assert.deepEqual(outcomes.map(r=>r.status).sort(),[200,409]);
+ const winner=outcomes.findIndex(r=>r.status===200),paid=outcomes[winner].data;assert.equal(paid.payLaterPayments.length,1);assert.equal(paid.entries.length,1);assert.equal(accountBalance(paid,'mandiri').current,1340000);
+ assert.deepEqual((await f.call('/finance',requests[winner],a.sessionToken)).data,paid);
+ assert.equal((await f.call('/finance',{action:'pl_cancel_payment',id:requests[winner].id,fields:{},password:'credit-password-123',expectedRevision:0,operationId:randomUUID()},other.sessionToken)).status,400);
+});
