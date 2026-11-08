@@ -9,6 +9,6 @@ export function inFinanceScope(e:FinanceEntry,scope:FinanceScope){
  if(scope==='repayments')return e.type==='expense'&&!!e.sourcePayLaterPaymentId;
  return e.type==='expense'&&!e.sourcePayLaterPaymentId;
 }
-export function matchesFinanceFilter(e:Pick<FinanceEntry,'accountId'|'category'>,f:{account:string;category:string}){
- return (f.account==='all'||(e.accountId??'mandiri')===f.account)&&(f.category==='all'||e.category===f.category);
+export function matchesFinanceFilter(e:Pick<FinanceEntry,'accountId'|'category'>,f:{account:string;category:string;type?:string}){
+ return (f.account==='all'||(e.accountId??'mandiri')===f.account)&&(f.category==='all'||f.category.split(',').includes(e.category));
 }

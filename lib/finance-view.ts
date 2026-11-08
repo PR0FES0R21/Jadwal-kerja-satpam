@@ -4,6 +4,7 @@ import {payLaterTransactions,payLaterBalance} from './paylater.ts';
 import {inFinanceScope,matchesFinanceFilter,type FinanceScope} from './finance-filter.ts';
 export function financeView(book:FinanceData,q:URLSearchParams){
  const from=q.get('from')||today(),to=q.get('to')||from,page=Number(q.get('page')||1),account=q.get('account')||'all',category=q.get('category')||'all',type=q.get('type')||'all';
+ if(category.length>1200||category.split(',').length>60)throw Error('Filter transaksi tidak valid.');
  if(!validDate(from)||!validDate(to)||from>to||!Number.isSafeInteger(page)||page<1)throw Error('Filter transaksi tidak valid.');
  const scope=(q.get('scope')||(q.get('cash')==='1'?'cash':'all')) as FinanceScope;
  if(!['all','cash','spending','repayments'].includes(scope)||!['all','income','expense'].includes(type))throw Error('Filter transaksi tidak valid.');
